@@ -1,0 +1,107 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+  SUPERADMIN
+}
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+  FACEBOOK
+  MICROSOFT
+}
+
+enum InterestCategory {
+  TRAVEL
+  BUSINESS
+  HEALTH
+  FINANCE
+  PRODUCTIVITY
+  DOCUMENTS
+  FITNESS
+  FOOD
+  TECHNOLOGY
+  EDUCATION
+  LIFESTYLE
+  OTHER
+}
+
+model User {
+  id             String          @id @default(cuid())
+  email          String          @unique
+  passwordHash   String?
+  fullName       String
+  avatarUrl      String?
+  role           Role            @default(USER)
+  isActive       Boolean         @default(true)
+  marketingOptIn Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  socialAccounts SocialAccount[]
+  profile        UserProfile?
+  medicalProfile MedicalProfile?
+
+  @@map("users")
+}
+
+model SocialAccount {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider       AuthProvider
+  providerUserId String
+  email          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+  @@map("social_accounts")
+}
+
+model UserProfile {
+  id          String             @id @default(cuid())
+  userId      String             @unique
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phone       String?
+  timezone    String             @default("Asia/Dubai")
+  bio         String?
+  dateOfBirth DateTime?
+  gender      String?
+  language    String             @default("en")
+  country     String?
+  city        String?
+  interests   InterestCategory[] @default([])
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@map("user_profiles")
+}
+
+/// Lightweight medical context for reminders/docs — not a clinical record.
+model MedicalProfile {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentSituation      String?
+  conditions            String[] @default([])
+  allergies             String[] @default([])
+  currentMedications    String[] @default([])
+  bloodType             String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("medical_profiles")
+}
