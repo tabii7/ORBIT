@@ -28,6 +28,9 @@
     "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"
   },
   "dependencies": {
+    "@langchain/core": "^1.2.9",
+    "@langchain/langgraph": "^1.4.14",
+    "@langchain/openai": "^1.5.11",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^12.0.0",
     "@nestjs/core": "^11.0.1",
@@ -42,10 +45,12 @@
     "google-auth-library": "^11.0.2",
     "jsonwebtoken": "^9.0.3",
     "jwks-rsa": "^4.1.0",
+    "langchain": "^1.5.10",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

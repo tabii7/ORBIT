@@ -35,6 +35,8 @@ async function bootstrap() {
     .addTag('Auth', 'Register, login, social login, current user')
     .addTag('Users', 'Admin user management (ADMIN / SUPERADMIN)')
     .addTag('Profile', 'User profile, interests, and medical situation')
+    .addTag('Conversations', 'Medical chat with AI + reminder tools')
+    .addTag('Reminders', 'Medicine and other reminders')
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);

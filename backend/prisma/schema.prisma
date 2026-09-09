@@ -35,6 +35,31 @@ enum InterestCategory {
   OTHER
 }
 
+enum ConversationType {
+  GENERAL
+  MEDICAL
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+enum ReminderType {
+  MEDICINE
+  APPOINTMENT
+  TASK
+  GENERAL
+}
+
+enum ReminderRecurrence {
+  ONCE
+  DAILY
+  WEEKLY
+}
+
 model User {
   id             String          @id @default(cuid())
   email          String          @unique
@@ -49,6 +74,8 @@ model User {
   socialAccounts SocialAccount[]
   profile        UserProfile?
   medicalProfile MedicalProfile?
+  conversations  Conversation[]
+  reminders      Reminder[]
 
   @@map("users")
 }
@@ -104,4 +131,54 @@ model MedicalProfile {
   updatedAt             DateTime @updatedAt
 
   @@map("medical_profiles")
+}
+
+model Conversation {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String?
+  type      ConversationType @default(MEDICAL)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  messages  Message[]
+
+  @@index([userId, updatedAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           MessageRole
+  content        String
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model Reminder {
+  id           String             @id @default(cuid())
+  userId       String
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         ReminderType       @default(MEDICINE)
+  title        String
+  description  String?
+  medicineName String?
+  dosage       String?
+  remindAt     DateTime
+  recurrence   ReminderRecurrence @default(ONCE)
+  timesOfDay   String[]           @default([])
+  timezone     String             @default("Asia/Dubai")
+  isActive     Boolean            @default(true)
+  isCompleted  Boolean            @default(false)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@index([userId, remindAt])
+  @@index([userId, type, isActive])
+  @@map("reminders")
 }
