@@ -1,4 +1,10 @@
-import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsEnum,
+  IsOptional,
+  IsString,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ConversationType } from '@prisma/client';
 
@@ -18,11 +24,14 @@ export class CreateConversationDto {
 }
 
 export class SendMessageDto {
-  @ApiProperty({
-    example: 'I take medicine X at 8 AM and 8 PM every day. Remind me.',
-    minLength: 1,
+  @ApiPropertyOptional({
+    example: 'Please read this report and remind me about the next appointment.',
+    description:
+      'Optional if images/documents are attached. Required when sending JSON with no files.',
   })
+  @ValidateIf((o: SendMessageDto) => o.content !== undefined && o.content !== '')
   @IsString()
   @MinLength(1)
-  content: string;
+  @IsOptional()
+  content?: string;
 }

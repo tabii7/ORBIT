@@ -60,22 +60,57 @@ enum ReminderRecurrence {
   WEEKLY
 }
 
+enum ReminderLogStatus {
+  TAKEN
+  SKIPPED
+  SNOOZED
+}
+
+enum HealthDocumentCategory {
+  LAB
+  PRESCRIPTION
+  IMAGING
+  OTHER
+}
+
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
+enum AttachmentKind {
+  IMAGE
+  DOCUMENT
+}
+
+enum ExtractStatus {
+  PENDING
+  READY
+  FAILED
+  SKIPPED
+}
+
 model User {
-  id             String          @id @default(cuid())
-  email          String          @unique
-  passwordHash   String?
-  fullName       String
-  avatarUrl      String?
-  role           Role            @default(USER)
-  isActive       Boolean         @default(true)
-  marketingOptIn Boolean         @default(false)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  socialAccounts SocialAccount[]
-  profile        UserProfile?
-  medicalProfile MedicalProfile?
-  conversations  Conversation[]
-  reminders      Reminder[]
+  id              String           @id @default(cuid())
+  email           String           @unique
+  passwordHash    String?
+  fullName        String
+  avatarUrl       String?
+  role            Role             @default(USER)
+  isActive        Boolean          @default(true)
+  marketingOptIn  Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  socialAccounts  SocialAccount[]
+  profile         UserProfile?
+  medicalProfile  MedicalProfile?
+  conversations   Conversation[]
+  reminders       Reminder[]
+  reminderLogs    ReminderLog[]
+  symptomEntries  SymptomEntry[]
+  healthDocuments HealthDocument[]
+  deviceTokens    DeviceToken[]
 
   @@map("users")
 }
@@ -148,37 +183,130 @@ model Conversation {
 }
 
 model Message {
-  id             String       @id @default(cuid())
+  id             String              @id @default(cuid())
   conversationId String
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation   Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   role           MessageRole
   content        String
   metadata       Json?
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime            @default(now())
+  attachments    MessageAttachment[]
 
   @@index([conversationId, createdAt])
   @@map("messages")
 }
 
+model MessageAttachment {
+  id              String        @id @default(cuid())
+  messageId       String
+  message         Message       @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  kind            AttachmentKind
+  originalName    String
+  mimeType        String
+  byteSize        Int
+  storagePath     String
+  publicUrl       String?
+  extractStatus   ExtractStatus @default(PENDING)
+  extractedText   String?
+  extractError    String?
+  healthDocumentId String?
+  healthDocument  HealthDocument? @relation(fields: [healthDocumentId], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+
+  @@index([messageId])
+  @@map("message_attachments")
+}
+
 model Reminder {
-  id           String             @id @default(cuid())
-  userId       String
-  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type         ReminderType       @default(MEDICINE)
-  title        String
-  description  String?
+  id          String             @id @default(cuid())
+  userId      String
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        ReminderType       @default(MEDICINE)
+  title       String
+  description String?
   medicineName String?
-  dosage       String?
-  remindAt     DateTime
-  recurrence   ReminderRecurrence @default(ONCE)
-  timesOfDay   String[]           @default([])
-  timezone     String             @default("Asia/Dubai")
-  isActive     Boolean            @default(true)
-  isCompleted  Boolean            @default(false)
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  dosage      String?
+  remindAt    DateTime
+  lastFiredAt DateTime?
+  recurrence  ReminderRecurrence @default(ONCE)
+  timesOfDay  String[]           @default([])
+  timezone    String             @default("Asia/Dubai")
+  isActive    Boolean            @default(true)
+  isCompleted Boolean            @default(false)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  logs        ReminderLog[]
 
   @@index([userId, remindAt])
   @@index([userId, type, isActive])
+  @@index([isActive, isCompleted, remindAt])
   @@map("reminders")
+}
+
+model ReminderLog {
+  id         String            @id @default(cuid())
+  reminderId String
+  reminder   Reminder          @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status     ReminderLogStatus
+  takenAt    DateTime          @default(now())
+  note       String?
+  createdAt  DateTime          @default(now())
+
+  @@index([reminderId, takenAt])
+  @@index([userId, takenAt])
+  @@map("reminder_logs")
+}
+
+model SymptomEntry {
+  id                 String   @id @default(cuid())
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recordedAt         DateTime @default(now())
+  symptoms           String[] @default([])
+  severity           Int
+  notes              String?
+  relatedMedications String[] @default([])
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([userId, recordedAt])
+  @@map("symptom_entries")
+}
+
+model HealthDocument {
+  id              String                 @id @default(cuid())
+  userId          String
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  category        HealthDocumentCategory @default(OTHER)
+  fileUrl         String?
+  storagePath     String?
+  mimeType        String?
+  byteSize        Int?
+  extractStatus   ExtractStatus          @default(SKIPPED)
+  extractedText   String?
+  notes           String?
+  recordedAt      DateTime               @default(now())
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  attachments     MessageAttachment[]
+
+  @@index([userId, recordedAt])
+  @@map("health_documents")
+}
+
+model DeviceToken {
+  id        String         @id @default(cuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String
+  platform  DevicePlatform
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([userId, token])
+  @@index([userId])
+  @@map("device_tokens")
 }
