@@ -18,6 +18,7 @@ import { FileStorageService } from '../files/file-storage.service';
 import { DocumentExtractService } from '../files/document-extract.service';
 import {
   CreateConversationDto,
+  ChatDto,
   SendMessageDto,
 } from './dto/conversation.dto';
 import type { ChatAttachmentInput } from '../ai/health/health-agent.service';
@@ -44,6 +45,46 @@ export class ConversationsService {
         type: dto.type ?? ConversationType.MEDICAL,
       },
     });
+  }
+
+  /**
+   * Chat-first entry: if conversationId is missing, create a conversation,
+   * then send the message and return one combined response.
+   */
+  async chat(userId: string, dto: ChatDto, files?: UploadedChatFiles) {
+    const images = files?.images ?? [];
+    const documents = files?.documents ?? [];
+    const content = (dto.content ?? '').trim();
+    if (!content && images.length === 0 && documents.length === 0) {
+      throw new BadRequestException(
+        'Provide message content and/or attach images/documents',
+      );
+    }
+
+    let conversationId = dto.conversationId?.trim() || undefined;
+    let isNewConversation = false;
+
+    if (!conversationId) {
+      const created = await this.create(userId, {
+        title: dto.title,
+        type: dto.type,
+      });
+      conversationId = created.id;
+      isNewConversation = true;
+    }
+
+    const result = await this.sendMessage(
+      userId,
+      conversationId,
+      { content: dto.content },
+      files,
+    );
+
+    return {
+      ...result,
+      conversationId,
+      isNewConversation,
+    };
   }
 
   list(userId: string) {

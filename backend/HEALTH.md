@@ -45,33 +45,36 @@ A Nest cron marks `lastFiredAt` every minute for due rows (no FCM send yet).
 - `GET /api/devices`
 - `DELETE /api/devices/:token`
 
-### Conversations (Health agent)
-- `POST /api/conversations` — default type `MEDICAL`
-- `POST /api/conversations/:id/messages` — text and/or **images** + **documents**
-- `GET /api/conversations/:id/messages` — history including `attachments[]`
-- `DELETE /api/conversations/:id`
-- `GENERAL` chats do not run health tools
+### Chat (primary)
 
-#### Chat attachments (multipart)
+**One endpoint to start or continue:**
 
-```bash
-curl -X POST "$HOST/api/conversations/$ID/messages" \
-  -H "Authorization: Bearer $TOKEN" \
-  -F "content=Please read this report" \
-  -F "images=@photo.jpg" \
-  -F "documents=@report.pdf"
+`POST /api/chat`
+
+| Field | Required | Notes |
+|-------|----------|--------|
+| `conversationId` | No | Omit = new chat; send = continue |
+| `content` | If no files | User message text |
+| `title` / `type` | No | Only used when creating new chat |
+| `images` / `documents` | No | Optional multipart files |
+
+**New chat (JSON):**
+```json
+{ "content": "Remind me metformin at 8 AM daily" }
 ```
 
-| Field | Purpose |
-|-------|---------|
-| `content` | Optional text (required if no files) |
-| `images` | Up to 5 images (vision) ≤ 8MB each |
-| `documents` | Up to 5 PDF/TXT (extracted + saved as health docs) ≤ 15MB |
+**Continue chat:**
+```json
+{ "conversationId": "<id>", "content": "Also add an evening dose" }
+```
 
-- Documents: text extracted when possible, stored on `health_documents.extractedText`, linked from message attachments
-- Images: sent to the vision-capable model with the message
-- Agent tools: `search_health_documents`, `get_health_document`
-- Files served under `/uploads/...`
+**Response includes:** `conversationId`, `isNewConversation`, `userMessage`, `assistantMessage`, `actions[]`
+
+### Conversations (history / list)
+
+- `GET /api/conversations` — chat list
+- `GET /api/conversations/:id/messages` — scrollable history
+- `DELETE /api/conversations/:id`
 
 ## Health agent tools
 

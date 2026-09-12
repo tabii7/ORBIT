@@ -24,8 +24,14 @@ async function bootstrap() {
     .setTitle('ORBIT API')
     .setDescription(
       'AI Personal Business, Life & Health Manager — Backend API documentation.\n\n' +
+        '## Auth\n' +
         'Use **Authorize** with a JWT from `/api/auth/login`, `/api/auth/register`, or `/api/auth/social`.\n\n' +
-        'Chat supports multipart attachments: fields `content`, `images`, `documents`.',
+        '## Chat-first (primary)\n' +
+        'Use **one endpoint**: `POST /api/chat`\n\n' +
+        '- **No `conversationId`** → creates a new chat and returns the assistant reply\n' +
+        '- **With `conversationId`** → continues that chat\n' +
+        '- **`images` / `documents`** → optional (multipart)\n\n' +
+        'History: `GET /api/conversations/{id}/messages` · List: `GET /api/conversations`',
     )
     .setVersion('1.0')
     .addBearerAuth(
@@ -41,8 +47,12 @@ async function bootstrap() {
     .addTag('Users', 'Admin user management (ADMIN / SUPERADMIN)')
     .addTag('Profile', 'User profile, interests, and medical situation')
     .addTag(
+      'Chat',
+      'Chat-first: POST /api/chat creates or continues a conversation in one call',
+    )
+    .addTag(
       'Conversations',
-      'Medical chat with text, images, documents + health agent tools',
+      'List / history / delete conversations (send messages via /api/chat)',
     )
     .addTag('Reminders', 'Medicine/appointment reminders, due polling, dose logs')
     .addTag('Symptoms', 'Symptom diary / check-ins')
