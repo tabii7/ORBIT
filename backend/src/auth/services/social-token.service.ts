@@ -15,7 +15,7 @@ export type VerifiedSocialIdentity = {
 export class SocialTokenService {
   private readonly googleClient: OAuth2Client;
   private readonly firebaseProjectId: string;
-  private readonly googleClientId?: string;
+  private readonly googleAudiences: string[];
   private readonly microsoftClientId?: string;
   private readonly facebookAppId?: string;
   private readonly microsoftJwks = jwksClient({
@@ -29,7 +29,11 @@ export class SocialTokenService {
     this.firebaseProjectId = this.config.getOrThrow<string>(
       'FIREBASE_PROJECT_ID',
     );
-    this.googleClientId = this.config.get<string>('GOOGLE_CLIENT_ID');
+    this.googleAudiences = [
+      this.config.get<string>('GOOGLE_CLIENT_ID'),
+      this.config.get<string>('GOOGLE_ANDROID_CLIENT_ID'),
+      this.config.get<string>('GOOGLE_IOS_CLIENT_ID'),
+    ].filter((id): id is string => Boolean(id && id.trim()));
     this.microsoftClientId = this.config.get<string>('MICROSOFT_CLIENT_ID');
     this.facebookAppId = this.config.get<string>('FACEBOOK_APP_ID');
   }
@@ -89,25 +93,32 @@ export class SocialTokenService {
   private async verifyGoogleToken(
     idToken: string,
   ): Promise<VerifiedSocialIdentity> {
-    if (!this.googleClientId) {
+    if (!this.googleAudiences.length) {
       throw new UnauthorizedException('Google client ID is not configured');
     }
 
-    const ticket = await this.googleClient.verifyIdToken({
-      idToken,
-      audience: this.googleClientId,
-    });
-    const payload = ticket.getPayload();
-    if (!payload?.sub || !payload.email) {
+    try {
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken,
+        audience: this.googleAudiences,
+      });
+      const payload = ticket.getPayload();
+      if (!payload?.sub || !payload.email) {
+        throw new UnauthorizedException('Invalid Google token');
+      }
+
+      return {
+        providerUserId: payload.sub,
+        email: payload.email.toLowerCase(),
+        fullName: payload.name ?? payload.email.split('@')[0],
+        avatarUrl: payload.picture,
+      };
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       throw new UnauthorizedException('Invalid Google token');
     }
-
-    return {
-      providerUserId: payload.sub,
-      email: payload.email.toLowerCase(),
-      fullName: payload.name ?? payload.email.split('@')[0],
-      avatarUrl: payload.picture,
-    };
   }
 
   private async verifyMicrosoftToken(
@@ -145,28 +156,70 @@ export class SocialTokenService {
   }
 
   private async verifyFacebookToken(
-    idToken: string,
+    accessToken: string,
   ): Promise<VerifiedSocialIdentity> {
     if (!this.facebookAppId) {
       throw new UnauthorizedException('Facebook app ID is not configured');
     }
 
-    const decoded = jwt.decode(idToken) as jwt.JwtPayload | null;
-    if (!decoded?.sub || !decoded.email) {
+    // Flutter sends a Facebook *access* token (EAA…), not a JWT id_token.
+    try {
+      const debugUrl = new URL('https://graph.facebook.com/debug_token');
+      debugUrl.searchParams.set('input_token', accessToken);
+      debugUrl.searchParams.set('access_token', accessToken);
+
+      const debugRes = await fetch(debugUrl);
+      if (debugRes.ok) {
+        const debugJson = (await debugRes.json()) as {
+          data?: { app_id?: string; is_valid?: boolean; user_id?: string };
+        };
+        const data = debugJson.data;
+        if (data?.is_valid === false) {
+          throw new UnauthorizedException('Invalid Facebook token');
+        }
+        if (data?.app_id && data.app_id !== this.facebookAppId) {
+          throw new UnauthorizedException('Invalid Facebook token audience');
+        }
+      }
+
+      const meUrl = new URL('https://graph.facebook.com/me');
+      meUrl.searchParams.set('fields', 'id,name,email,picture.type(large)');
+      meUrl.searchParams.set('access_token', accessToken);
+
+      const meRes = await fetch(meUrl);
+      if (!meRes.ok) {
+        throw new UnauthorizedException('Invalid Facebook token');
+      }
+
+      const me = (await meRes.json()) as {
+        id?: string;
+        name?: string;
+        email?: string;
+        picture?: { data?: { url?: string } };
+        error?: { message?: string };
+      };
+
+      if (me.error || !me.id) {
+        throw new UnauthorizedException('Invalid Facebook token');
+      }
+
+      if (!me.email) {
+        throw new UnauthorizedException(
+          'Facebook account has no email. Grant email permission and try again.',
+        );
+      }
+
+      return {
+        providerUserId: me.id,
+        email: me.email.toLowerCase(),
+        fullName: me.name ?? me.email.split('@')[0],
+        avatarUrl: me.picture?.data?.url,
+      };
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       throw new UnauthorizedException('Invalid Facebook token');
     }
-
-    if (decoded.aud !== this.facebookAppId) {
-      throw new UnauthorizedException('Invalid Facebook token audience');
-    }
-
-    return {
-      providerUserId: decoded.sub,
-      email: String(decoded.email).toLowerCase(),
-      fullName:
-        (decoded.name as string | undefined) ??
-        String(decoded.email).split('@')[0],
-      avatarUrl: decoded.picture as string | undefined,
-    };
   }
 }

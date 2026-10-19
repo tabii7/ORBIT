@@ -23,6 +23,7 @@ import { memoryStorage } from 'multer';
 import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ApiCode, ApiSuccess } from '../common/response';
 import { ConversationsService } from './conversations.service';
 import { ChatDto } from './dto/conversation.dto';
 import {
@@ -42,13 +43,19 @@ export class ChatController {
 
   @Post()
   @HttpCode(201)
+  @ApiSuccess({
+    code: ApiCode.CHAT_SUCCESS,
+    message: 'Chat response ready',
+  })
   @ApiConsumes('application/json', 'multipart/form-data')
   @ApiBody({
     description:
-      '**Chat-first single endpoint.**\n\n' +
-      '- Omit `conversationId` → creates a new MEDICAL chat, sends the message, returns reply\n' +
+      '**Chat-first single endpoint.** One conversation; Main agent routes to domain sub-agents.\n\n' +
+      '- Omit `conversationId` → creates a new chat, sends the message, returns reply\n' +
       '- Send `conversationId` → continues that chat\n' +
-      '- `images` / `documents` are **optional** (multipart only)\n\n' +
+      '- Main router → **Health** | **Travel** | **Finance** | **Productivity** (tasks/calendar/daily plan)\n' +
+      '- `images` / `documents` are **optional** (multipart only)\n' +
+      '- **Any file type** accepted (jpg/png/pdf/docx/…); MIME is not blocked\n\n' +
       'For text-only use `application/json`. For files use `multipart/form-data`.',
     schema: {
       oneOf: [
@@ -65,17 +72,23 @@ export class ChatController {
               type: 'string',
               example: 'Please read this report',
             },
-            title: { type: 'string', example: 'Health chat' },
-            type: { type: 'string', enum: ['GENERAL', 'MEDICAL'] },
+            title: { type: 'string', example: 'Istanbul trip' },
+            folderId: {
+              type: 'string',
+              description: 'Optional. Put new chat into a folder.',
+              example: 'cmfolder…',
+            },
             images: {
               type: 'array',
               items: { type: 'string', format: 'binary' },
-              description: 'Optional. Up to 5 images.',
+              description:
+                'Optional. Up to 5 files via field `images` (any type, ≤8MB each). Prefer photos here.',
             },
             documents: {
               type: 'array',
               items: { type: 'string', format: 'binary' },
-              description: 'Optional. Up to 5 PDF/TXT documents.',
+              description:
+                'Optional. Up to 5 files via field `documents` (any type, ≤15MB each). Prefer PDF/DOC/TXT here.',
             },
           },
         },
@@ -98,10 +111,18 @@ export class ChatController {
 \`\`\`
 
 ### Attachments (optional)
-Multipart fields: \`content\`, \`conversationId\`, \`images\`, \`documents\`.
+\`multipart/form-data\` fields: \`content\`, \`conversationId\`, \`title\`, \`folderId\`, \`images\`, \`documents\`.
+Any file type accepted. Size: images ≤8MB, documents ≤15MB. Max 5 per field.
+
+### Domains (examples)
+- Health: \`"Remind me metformin daily at 8 AM"\`
+- Travel: \`"Find hotels in Istanbul Oct 10-14"\`
+- Finance: \`"I spent 120 AED on groceries"\`
+- Productivity: \`"Organize my day"\` / \`"Meeting with Ali tomorrow at 10am"\`
 
 ### Response
 Always returns \`conversationId\`, \`isNewConversation\`, \`userMessage\`, \`assistantMessage\`, \`actions[]\`.
+Assistant \`metadata\` may include \`agent\` and \`routedTo\`.
 `,
   })
   @ApiCreatedResponse({

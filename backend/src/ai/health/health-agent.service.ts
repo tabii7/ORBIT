@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ConversationType } from '@prisma/client';
 import { ChatOpenAI } from '@langchain/openai';
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import {
@@ -12,27 +11,17 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RemindersService } from '../../reminders/reminders.service';
 import { SymptomsService } from '../../symptoms/symptoms.service';
 import { HealthDocumentsService } from '../../health-documents/health-documents.service';
+import {
+  AgentChatParams,
+  AgentChatResult,
+  ChatAttachmentInput,
+} from '../agent.types';
+import { buildAttachmentContext } from '../attachment-context';
 import { buildHealthSystemPrompt } from './health-agent.prompt';
 import {
   createHealthAgentTools,
   HealthAgentAction,
 } from './health-agent.tools';
-
-type ChatHistoryItem = {
-  role: 'USER' | 'ASSISTANT' | 'SYSTEM';
-  content: string;
-};
-
-export type ChatAttachmentInput = {
-  kind: 'IMAGE' | 'DOCUMENT';
-  mimeType: string;
-  originalName: string;
-  base64?: string;
-  extractedText?: string | null;
-  extractStatus?: string;
-  publicUrl?: string;
-  healthDocumentId?: string;
-};
 
 @Injectable()
 export class HealthAgentService {
@@ -46,22 +35,7 @@ export class HealthAgentService {
     private readonly healthDocumentsService: HealthDocumentsService,
   ) {}
 
-  async chat(params: {
-    userId: string;
-    userMessage: string;
-    history: ChatHistoryItem[];
-    conversationType?: ConversationType;
-    attachments?: ChatAttachmentInput[];
-  }) {
-    if (params.conversationType === ConversationType.GENERAL) {
-      return {
-        message:
-          'This conversation is marked general. Start a medical/health chat to use the ORBIT Health Assistant tools for profile, reminders, and symptoms.',
-        actions: [] as HealthAgentAction[],
-        model: 'none',
-      };
-    }
-
+  async chat(params: AgentChatParams): Promise<AgentChatResult> {
     const apiKey = this.config.get<string>('OPENAI_API_KEY');
     if (!apiKey) {
       throw new Error('OPENAI_API_KEY is not configured');
@@ -112,7 +86,7 @@ export class HealthAgentService {
       tools,
     });
 
-    const attachmentContext = this.buildAttachmentContext(attachments);
+    const attachmentContext = buildAttachmentContext(attachments);
     const docsSummary = documents.slice(0, 10).map((d) => ({
       id: d.id,
       title: d.title,
@@ -133,7 +107,7 @@ export class HealthAgentService {
       (attachmentContext
         ? `\n\nAttachments on the latest user message:\n${attachmentContext}`
         : '') +
-      '\n\nIf the user attached a document/image, use the extracted text / image content to answer. You may also call search_health_documents or get_health_document.';
+      '\n\nIf the user attached a document/image, READ the extracted text (and image if provided) and answer accordingly. Summarize clearly; do not invent labs or diagnoses. You may call search_health_documents or get_health_document for stored docs.';
 
     const historyMessages = params.history.slice(-12).map((m) => {
       if (m.role === 'ASSISTANT') return new AIMessage(m.content);
@@ -168,28 +142,9 @@ export class HealthAgentService {
       message: content,
       actions,
       model: modelName,
+      agent: 'HEALTH',
+      routedTo: ['HEALTH'],
     };
-  }
-
-  private buildAttachmentContext(attachments: ChatAttachmentInput[]) {
-    if (!attachments.length) return '';
-    return attachments
-      .map((a, i) => {
-        if (a.kind === 'DOCUMENT') {
-          const text = a.extractedText
-            ? a.extractedText.slice(0, 12_000)
-            : '(no extractable text yet)';
-          return [
-            `Document #${i + 1}: ${a.originalName} (${a.mimeType}) status=${a.extractStatus}`,
-            `healthDocumentId=${a.healthDocumentId ?? 'n/a'}`,
-            '--- extracted text start ---',
-            text,
-            '--- extracted text end ---',
-          ].join('\n');
-        }
-        return `Image #${i + 1}: ${a.originalName} (${a.mimeType}) — see attached image content.`;
-      })
-      .join('\n\n');
   }
 
   private buildHumanMessage(

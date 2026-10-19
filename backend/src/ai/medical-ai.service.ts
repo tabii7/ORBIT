@@ -1,22 +1,27 @@
 import { Injectable } from '@nestjs/common';
 import { ConversationType } from '@prisma/client';
+import { MainAgentService } from './main/main-agent.service';
 import {
+  AgentChatResult,
   ChatAttachmentInput,
-  HealthAgentService,
-} from './health/health-agent.service';
+  ChatHistoryItem,
+} from './agent.types';
 
-/** @deprecated Prefer HealthAgentService — kept for existing imports. */
+/**
+ * Chat entry façade used by ConversationsService.
+ * Delegates to MainAgentService (router → Health / Travel sub-agents).
+ */
 @Injectable()
 export class MedicalAiService {
-  constructor(private readonly healthAgent: HealthAgentService) {}
+  constructor(private readonly mainAgent: MainAgentService) {}
 
   chat(params: {
     userId: string;
     userMessage: string;
-    history: Array<{ role: 'USER' | 'ASSISTANT' | 'SYSTEM'; content: string }>;
+    history: ChatHistoryItem[];
     conversationType?: ConversationType;
     attachments?: ChatAttachmentInput[];
-  }) {
-    return this.healthAgent.chat(params);
+  }): Promise<AgentChatResult> {
+    return this.mainAgent.chat(params);
   }
 }

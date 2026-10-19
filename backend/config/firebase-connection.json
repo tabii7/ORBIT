@@ -1,0 +1,38 @@
+{
+  "projectId": "orbitai-dccf8",
+  "projectNumber": "807939731928",
+  "authDomain": "orbitai-dccf8.firebaseapp.com",
+  "storageBucket": "orbitai-dccf8.appspot.com",
+  "messagingSenderId": "807939731928",
+  "apps": {
+    "android": {
+      "packageName": "com.emiratestechhub.orbitai",
+      "appId": "1:807939731928:android:620f5474ed1de7ec77c2ad",
+      "oauthClientId": "807939731928-j1nj01d7j0r937ncdn019uci2tpj95vg.apps.googleusercontent.com"
+    },
+    "ios": {
+      "oauthClientId": "807939731928-scaap4recghelm72l3vuntsa4b14p397.apps.googleusercontent.com"
+    },
+    "web": {
+      "oauthClientId": "807939731928-56tl3ql9t5uoibnsnmac1miogav3ql07.apps.googleusercontent.com"
+    }
+  },
+  "oauth": {
+    "googleWebClientId": "807939731928-56tl3ql9t5uoibnsnmac1miogav3ql07.apps.googleusercontent.com",
+    "googleAndroidClientId": "807939731928-j1nj01d7j0r937ncdn019uci2tpj95vg.apps.googleusercontent.com",
+    "googleIosClientId": "807939731928-scaap4recghelm72l3vuntsa4b14p397.apps.googleusercontent.com"
+  },
+  "facebook": {
+    "appId": "1768707840960883"
+  },
+  "fcm": {
+    "enabled": true,
+    "note": "Device FCM tokens are stored via /api/auth/login|register|social and /api/devices"
+  },
+  "backend": {
+    "apiBaseUrl": "http://187.77.175.27/api",
+    "firebaseProjectIdEnv": "FIREBASE_PROJECT_ID",
+    "serviceAccountPathEnv": "FIREBASE_SERVICE_ACCOUNT_PATH",
+    "serviceAccountPath": "./config/firebase-service-account.json"
+  }
+}

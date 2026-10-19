@@ -1,6 +1,6 @@
 # ORBIT Health Backend
 
-Complete health vertical: medical profile, reminders (CRUD + adherence), symptoms, health documents, device tokens, and a tool-using Health agent.
+Complete health + travel + finance verticals on one chat: medical profile, reminders, symptoms, health documents, device tokens, travel preferences/trips, finance budget/watchlists/alerts, and Main → domain sub-agents.
 
 ## Base URL
 
@@ -17,7 +17,7 @@ All health endpoints require `Authorization: Bearer <JWT>`.
 ### Reminders
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/api/reminders` | Create MEDICINE / APPOINTMENT / TASK / GENERAL |
+| `POST` | `/api/reminders` | Create MEDICINE / APPOINTMENT / TASK / GENERAL / TRAVEL |
 | `GET` | `/api/reminders` | List (`type`, `isActive`, `from`, `to`) |
 | `GET` | `/api/reminders/due` | Due now (`remindAt <= now`) for client polling |
 | `GET` | `/api/reminders/:id` | Detail + recent dose logs |
@@ -39,6 +39,11 @@ A Nest cron marks `lastFiredAt` every minute for due rows (no FCM send yet).
 - `POST /api/health-documents` — metadata (`LAB` / `PRESCRIPTION` / `IMAGING` / `OTHER`)
 - `GET /api/health-documents`
 - `DELETE /api/health-documents/:id`
+- **Chat upload:** attach `images` / `documents` on `POST /api/chat`. Text PDF/TXT parsed locally; images & scanned PDFs use vision OCR (**chat-only**). Agent reads extracted text and replies (medical → Health; invoice → Business; etc.).
+
+### Travel preferences
+- `GET/PUT /api/travel/preferences` — home city/airport, hotel/flight budgets, stars, airlines, cabin
+- Also returned on `GET /api/profile` as `travel`
 
 ### Devices
 - `POST /api/devices` — register FCM/APNs token
@@ -47,7 +52,7 @@ A Nest cron marks `lastFiredAt` every minute for due rows (no FCM send yet).
 
 ### Chat (primary)
 
-**One endpoint to start or continue:**
+**One conversation endpoint; Main agent routes to sub-agents:**
 
 `POST /api/chat`
 
@@ -58,9 +63,13 @@ A Nest cron marks `lastFiredAt` every minute for due rows (no FCM send yet).
 | `title` / `type` | No | Only used when creating new chat |
 | `images` / `documents` | No | Optional multipart files |
 
+Flow: `ConversationsService` → `MainAgentService` (classify) → `HealthAgentService` / `TravelAgentService` / `FinanceAgentService`.
+
+Assistant message metadata includes `agent` and `routedTo` for debugging.
+
 **New chat (JSON):**
 ```json
-{ "content": "Remind me metformin at 8 AM daily" }
+{ "content": "Find hotels in Istanbul Oct 10-14 under 800 AED and remind me the day before" }
 ```
 
 **Continue chat:**
@@ -76,28 +85,53 @@ A Nest cron marks `lastFiredAt` every minute for due rows (no FCM send yet).
 - `GET /api/conversations/:id/messages` — scrollable history
 - `DELETE /api/conversations/:id`
 
-## Health agent tools
+## ORBIT agents
 
+**Main (router)** — `src/ai/main/` — classifies `HEALTH` | `TRAVEL` (mixed → both sequentially). No domain tools.
+
+**Health sub-agent** — `src/ai/health/`
 | Tool | Effect |
 |------|--------|
 | `get_medical_profile` | Read profile |
 | `save_medical_info` | Upsert profile fields |
 | `list_reminders` / `list_due_reminders` | Read reminders |
-| `create_medicine_reminder` / `create_appointment_reminder` | Create + profile meds |
+| `create_medicine_reminder` / `create_appointment_reminder` / `create_general_reminder` | Create + profile meds |
 | `update_reminder` / `cancel_reminder` | Edit / deactivate |
 | `log_dose` | Adherence log |
 | `log_symptom` / `list_symptoms` | Symptom diary |
 | `save_health_document_note` | Document metadata |
 | `get_health_summary` | Compact snapshot |
 
-Prompt + few-shots live in `src/ai/health/health-agent.prompt.ts`.  
-This is **prompt/tool training**, not model fine-tuning.
+**Travel sub-agent** — `src/ai/travel/`
+| Tool | Effect |
+|------|--------|
+| `get_travel_preferences` / `save_travel_preferences` | Profile travel defaults |
+| `search_hotels` / `search_flights` | Web search → score/compare vs prefs → ranked offers + booking URLs |
+| `plan_trip` | Create trip + search hotels/flights + attach ranked offers |
+| `create_trip` / `list_trips` / `get_trip` | Trip CRUD shell |
+| `select_trip_offer` | Mark hotel/flight choice; return external bookingUrl |
+| `create_travel_reminder` | TRAVEL-type reminder for flight/hotel dates |
+
+**Finance sub-agent** — `src/ai/finance/` (see also `FINANCE.md`)
+| Tool | Effect |
+|------|--------|
+| `log_expense` / `log_income` / `list_budget` / `budget_summary` | Budget tracking |
+| `add_watchlist` / `list_watchlist` / `remove_watchlist` | Symbols |
+| `create_price_alert` / `list_price_alerts` | Threshold alerts → FCM |
+| Market quotes / ADX / news | Removed from OpenAI web search — awaits dedicated market-data API |
+
+**REST:** `GET/POST/PATCH/DELETE /api/travel/trips`, `POST …/select-hotel|select-flight`; finance under `/api/finance/*`.
+
+Agents never book, pay, or execute trades — only recommend / inform with tool results.
+
+Prompts live next to each agent (`*-agent.prompt.ts`). Adding a domain later: new folder under `src/ai/<domain>/`, register in `AiModule`, add a branch in Main classify/dispatch.
 
 ## Env
 
 ```bash
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o-mini   # optional
+OPENAI_SEARCH_MODEL=gpt-4o # optional; hotel/flight web_search model
 DATABASE_URL=postgresql://...
 JWT_SECRET=...
 FIREBASE_PROJECT_ID=...

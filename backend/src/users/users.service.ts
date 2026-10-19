@@ -20,6 +20,7 @@ export class UsersService {
     role: Role;
     avatarUrl?: string;
     marketingOptIn?: boolean;
+    emailVerifiedAt?: Date | null;
   }) {
     return this.prisma.user.create({ data });
   }

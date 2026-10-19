@@ -11,6 +11,12 @@ import { ConversationsModule } from './conversations/conversations.module';
 import { SymptomsModule } from './symptoms/symptoms.module';
 import { HealthDocumentsModule } from './health-documents/health-documents.module';
 import { DevicesModule } from './devices/devices.module';
+import { TravelModule } from './travel/travel.module';
+import { FinanceModule } from './finance/finance.module';
+import { ProductivityModule } from './productivity/productivity.module';
+import { BusinessModule } from './business/business.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -24,6 +30,12 @@ import { DevicesModule } from './devices/devices.module';
     SymptomsModule,
     HealthDocumentsModule,
     DevicesModule,
+    TravelModule,
+    FinanceModule,
+    ProductivityModule,
+    BusinessModule,
+    NotificationsModule,
+    SupportModule,
     AiModule,
     ConversationsModule,
   ],

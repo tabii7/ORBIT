@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { DevicePlatform } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDeviceDto } from './dto/device.dto';
 
@@ -6,23 +7,45 @@ import { RegisterDeviceDto } from './dto/device.dto';
 export class DevicesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  register(userId: string, dto: RegisterDeviceDto) {
+  register(
+    userId: string,
+    dto: { token?: string; fcmToken?: string; platform: DevicePlatform },
+  ) {
+    const token = (dto.fcmToken || dto.token || '').trim();
+    if (!token || token.length < 8) {
+      throw new BadRequestException('fcmToken (or token) is required');
+    }
+    if (!dto.platform) {
+      throw new BadRequestException('platform is required');
+    }
+
     return this.prisma.deviceToken.upsert({
       where: {
         userId_token: {
           userId,
-          token: dto.token,
+          token,
         },
       },
       create: {
         userId,
-        token: dto.token,
+        token,
         platform: dto.platform,
       },
       update: {
         platform: dto.platform,
       },
     });
+  }
+
+  /** Best-effort save from auth flows — ignores empty tokens. */
+  async registerIfPresent(
+    userId: string,
+    fields?: { fcmToken?: string; platform?: DevicePlatform },
+  ) {
+    const token = fields?.fcmToken?.trim();
+    if (!token) return null;
+    const platform = fields?.platform ?? DevicePlatform.ANDROID;
+    return this.register(userId, { fcmToken: token, platform });
   }
 
   async unregister(userId: string, token: string) {
@@ -35,7 +58,7 @@ export class DevicesService {
     await this.prisma.deviceToken.delete({
       where: { id: existing.id },
     });
-    return { ok: true };
+    return { ok: true, deleted: true, token };
   }
 
   list(userId: string) {

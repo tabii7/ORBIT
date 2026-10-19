@@ -7,10 +7,13 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { DevicePlatform } from '@prisma/client';
 
 export enum SocialProvider {
   GOOGLE = 'google',
@@ -72,4 +75,22 @@ export class SocialAuthDto {
   @ValidateNested()
   @Type(() => SocialUserDto)
   user?: SocialUserDto;
+
+  @ApiPropertyOptional({
+    example: 'dGVzdC1mY20tdG9rZW4tZXhhbXBsZQ',
+    description: 'FCM push token for this device (saved on social login)',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  fcmToken?: string;
+
+  @ApiPropertyOptional({
+    enum: DevicePlatform,
+    example: DevicePlatform.ANDROID,
+    description: 'Device platform — required when fcmToken is sent',
+  })
+  @ValidateIf((o: SocialAuthDto) => Boolean(o.fcmToken))
+  @IsEnum(DevicePlatform)
+  platform?: DevicePlatform;
 }

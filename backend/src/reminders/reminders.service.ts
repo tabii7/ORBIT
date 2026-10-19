@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   ReminderLogStatus,
@@ -10,6 +10,7 @@ import {
   advanceRemindAt,
   resolveRemindAt,
 } from '../common/time/remind-at';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   CreateReminderDto,
   LogReminderDto,
@@ -34,7 +35,12 @@ export type CreateMedicineReminderInput = CreateReminderInput & {
 
 @Injectable()
 export class RemindersService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(RemindersService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   createReminder(userId: string, input: CreateReminderInput) {
     return this.prisma.reminder.create({
@@ -109,7 +115,7 @@ export class RemindersService {
             }
           : {}),
       },
-      orderBy: { remindAt: 'asc' },
+      orderBy: [{ createdAt: 'desc' }, { remindAt: 'desc' }],
     });
   }
 
@@ -180,10 +186,14 @@ export class RemindersService {
       throw new NotFoundException('Reminder not found');
     }
 
-    return this.prisma.reminder.update({
-      where: { id },
-      data: { isActive: false, isCompleted: true },
-    });
+    await this.prisma.reminder.delete({ where: { id } });
+
+    return {
+      ok: true,
+      deleted: true,
+      id: reminder.id,
+      title: reminder.title,
+    };
   }
 
   listDueForUser(userId: string, now = new Date()) {
@@ -207,6 +217,108 @@ export class RemindersService {
       },
       orderBy: { remindAt: 'asc' },
     });
+  }
+
+  /**
+   * Mobile-friendly schedule list (reminders now; extensible later).
+   */
+  async listSchedules(
+    userId: string,
+    query?: {
+      type?: ReminderType;
+      status?: 'UPCOMING' | 'DUE' | 'COMPLETED' | 'ALL';
+      from?: string;
+      to?: string;
+    },
+  ) {
+    const now = new Date();
+    const status = query?.status ?? 'ALL';
+
+    const where: {
+      userId: string;
+      type?: ReminderType;
+      isActive?: boolean;
+      isCompleted?: boolean;
+      remindAt?: { gte?: Date; lte?: Date };
+    } = { userId };
+
+    if (query?.type) {
+      where.type = query.type;
+    }
+
+    if (status === 'UPCOMING') {
+      where.isActive = true;
+      where.isCompleted = false;
+      where.remindAt = {
+        gte: query?.from ? new Date(query.from) : now,
+        ...(query?.to ? { lte: new Date(query.to) } : {}),
+      };
+    } else if (status === 'DUE') {
+      where.isActive = true;
+      where.isCompleted = false;
+      where.remindAt = {
+        lte: query?.to ? new Date(query.to) : now,
+        ...(query?.from ? { gte: new Date(query.from) } : {}),
+      };
+    } else if (status === 'COMPLETED') {
+      where.isCompleted = true;
+      if (query?.from || query?.to) {
+        where.remindAt = {
+          ...(query.from ? { gte: new Date(query.from) } : {}),
+          ...(query.to ? { lte: new Date(query.to) } : {}),
+        };
+      }
+    } else {
+      // ALL
+      if (query?.from || query?.to) {
+        where.remindAt = {
+          ...(query.from ? { gte: new Date(query.from) } : {}),
+          ...(query.to ? { lte: new Date(query.to) } : {}),
+        };
+      }
+    }
+
+    const rows = await this.prisma.reminder.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { remindAt: 'desc' }],
+    });
+
+    const items = rows.map((r) => {
+      const isDue =
+        r.isActive && !r.isCompleted && r.remindAt.getTime() <= now.getTime();
+      const scheduleStatus = r.isCompleted
+        ? 'COMPLETED'
+        : !r.isActive
+          ? 'INACTIVE'
+          : isDue
+            ? 'DUE'
+            : 'UPCOMING';
+
+      return {
+        id: r.id,
+        source: 'REMINDER' as const,
+        type: r.type,
+        title: r.title,
+        description: r.description,
+        medicineName: r.medicineName,
+        dosage: r.dosage,
+        scheduledAt: r.remindAt,
+        timezone: r.timezone,
+        recurrence: r.recurrence,
+        timesOfDay: r.timesOfDay,
+        isActive: r.isActive,
+        isCompleted: r.isCompleted,
+        isDue,
+        status: scheduleStatus,
+      };
+    });
+
+    return {
+      total: items.length,
+      status,
+      now: now.toISOString(),
+      items,
+    };
   }
 
   async logForUser(userId: string, id: string, dto: LogReminderDto) {
@@ -278,17 +390,30 @@ export class RemindersService {
     });
   }
 
-  /** Marks due once-reminders' lastFiredAt; recurring ones stay due until logged. */
+  /** Marks due reminders' lastFiredAt and sends FCM push when configured. */
   @Cron(CronExpression.EVERY_MINUTE)
   async processDueReminders() {
     const due = await this.listDue();
     const now = new Date();
     for (const reminder of due) {
-      if (!reminder.lastFiredAt || reminder.lastFiredAt < reminder.remindAt) {
-        await this.prisma.reminder.update({
-          where: { id: reminder.id },
-          data: { lastFiredAt: now },
-        });
+      const shouldFire =
+        !reminder.lastFiredAt || reminder.lastFiredAt < reminder.remindAt;
+      if (!shouldFire) continue;
+
+      await this.prisma.reminder.update({
+        where: { id: reminder.id },
+        data: { lastFiredAt: now },
+      });
+
+      try {
+        const result = await this.notificationsService.notifyReminder(reminder);
+        this.logger.debug(
+          `Reminder push id=${reminder.id} sent=${'sent' in result ? result.sent : 0} skipped=${result.skipped}`,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Reminder push failed id=${reminder.id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
   }

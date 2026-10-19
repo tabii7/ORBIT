@@ -14,6 +14,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MedicalAiService } from '../ai/medical-ai.service';
+import { runWithChatOpenAi } from '../ai/openai-chat-scope';
 import { FileStorageService } from '../files/file-storage.service';
 import { DocumentExtractService } from '../files/document-extract.service';
 import {
@@ -21,7 +22,9 @@ import {
   ChatDto,
   SendMessageDto,
 } from './dto/conversation.dto';
-import type { ChatAttachmentInput } from '../ai/health/health-agent.service';
+import { UpdateConversationDto } from './dto/chat-folder.dto';
+import { ChatFoldersService } from './chat-folders.service';
+import type { ChatAttachmentInput } from '../ai/agent.types';
 
 export type UploadedChatFiles = {
   images?: Express.Multer.File[];
@@ -35,14 +38,20 @@ export class ConversationsService {
     private readonly medicalAiService: MedicalAiService,
     private readonly fileStorage: FileStorageService,
     private readonly documentExtract: DocumentExtractService,
+    private readonly chatFoldersService: ChatFoldersService,
   ) {}
 
-  create(userId: string, dto: CreateConversationDto) {
+  async create(userId: string, dto: CreateConversationDto) {
+    const folderId = dto.folderId?.trim() || undefined;
+    if (folderId) {
+      await this.chatFoldersService.assertOwned(userId, folderId);
+    }
     return this.prisma.conversation.create({
       data: {
         userId,
-        title: dto.title ?? 'Health chat',
+        title: dto.title ?? 'New chat',
         type: dto.type ?? ConversationType.MEDICAL,
+        folderId,
       },
     });
   }
@@ -68,6 +77,7 @@ export class ConversationsService {
       const created = await this.create(userId, {
         title: dto.title,
         type: dto.type,
+        folderId: dto.folderId,
       });
       conversationId = created.id;
       isNewConversation = true;
@@ -87,16 +97,50 @@ export class ConversationsService {
     };
   }
 
-  list(userId: string) {
+  list(
+    userId: string,
+    opts?: { folderId?: string; uncategorized?: boolean },
+  ) {
     return this.prisma.conversation.findMany({
-      where: { userId },
+      where: {
+        userId,
+        ...(opts?.uncategorized
+          ? { folderId: null }
+          : opts?.folderId
+            ? { folderId: opts.folderId }
+            : {}),
+      },
       orderBy: { updatedAt: 'desc' },
       include: {
+        folder: { select: { id: true, name: true } },
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
           include: { attachments: true },
         },
+      },
+    });
+  }
+
+  async updateConversation(
+    userId: string,
+    conversationId: string,
+    dto: UpdateConversationDto,
+  ) {
+    await this.getOwnedConversation(userId, conversationId);
+
+    if (dto.folderId !== undefined && dto.folderId !== null) {
+      await this.chatFoldersService.assertOwned(userId, dto.folderId);
+    }
+
+    return this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        ...(dto.title !== undefined ? { title: dto.title.trim() } : {}),
+        ...(dto.folderId !== undefined ? { folderId: dto.folderId } : {}),
+      },
+      include: {
+        folder: { select: { id: true, name: true } },
       },
     });
   }
@@ -156,48 +200,21 @@ export class ConversationsService {
 
     for (const file of images) {
       this.assertAllowedImage(file);
+      const mimeType = this.resolveMime(file);
       const saved = await this.fileStorage.saveBuffer({
         userId,
         originalName: file.originalname,
         buffer: file.buffer,
         subdir: 'chat/images',
       });
-      const row = await this.prisma.messageAttachment.create({
-        data: {
-          messageId: userMessage.id,
-          kind: AttachmentKind.IMAGE,
+
+      const extracted = await runWithChatOpenAi(() =>
+        this.documentExtract.extractText({
+          buffer: file.buffer,
+          mimeType,
           originalName: file.originalname,
-          mimeType: file.mimetype,
-          byteSize: file.size,
-          storagePath: saved.storagePath,
-          publicUrl: saved.publicUrl,
-          extractStatus: ExtractStatus.SKIPPED,
-        },
-      });
-      savedAttachments.push(row);
-      attachmentInputs.push({
-        kind: 'IMAGE',
-        mimeType: file.mimetype,
-        originalName: file.originalname,
-        base64: file.buffer.toString('base64'),
-        publicUrl: saved.publicUrl,
-      });
-    }
-
-    for (const file of documents) {
-      this.assertAllowedDocument(file);
-      const saved = await this.fileStorage.saveBuffer({
-        userId,
-        originalName: file.originalname,
-        buffer: file.buffer,
-        subdir: 'chat/documents',
-      });
-
-      const extracted = await this.documentExtract.extractText({
-        buffer: file.buffer,
-        mimeType: file.mimetype,
-        originalName: file.originalname,
-      });
+        }),
+      );
 
       const healthDoc = await this.prisma.healthDocument.create({
         data: {
@@ -206,7 +223,68 @@ export class ConversationsService {
           category: HealthDocumentCategory.OTHER,
           fileUrl: saved.publicUrl,
           storagePath: saved.storagePath,
-          mimeType: file.mimetype,
+          mimeType,
+          byteSize: file.size,
+          extractStatus: extracted.status as ExtractStatus,
+          extractedText: extracted.text,
+          notes: 'Uploaded via chat (image)',
+        },
+      });
+
+      const row = await this.prisma.messageAttachment.create({
+        data: {
+          messageId: userMessage.id,
+          kind: AttachmentKind.IMAGE,
+          originalName: file.originalname,
+          mimeType,
+          byteSize: file.size,
+          storagePath: saved.storagePath,
+          publicUrl: saved.publicUrl,
+          extractStatus: extracted.status as ExtractStatus,
+          extractedText: extracted.text,
+          extractError: extracted.error,
+          healthDocumentId: healthDoc.id,
+        },
+      });
+      savedAttachments.push(row);
+      attachmentInputs.push({
+        kind: 'IMAGE',
+        mimeType,
+        originalName: file.originalname,
+        base64: file.buffer.toString('base64'),
+        extractedText: extracted.text,
+        extractStatus: extracted.status,
+        publicUrl: saved.publicUrl,
+        healthDocumentId: healthDoc.id,
+      });
+    }
+
+    for (const file of documents) {
+      this.assertAllowedDocument(file);
+      const mimeType = this.resolveMime(file);
+      const saved = await this.fileStorage.saveBuffer({
+        userId,
+        originalName: file.originalname,
+        buffer: file.buffer,
+        subdir: 'chat/documents',
+      });
+
+      const extracted = await runWithChatOpenAi(() =>
+        this.documentExtract.extractText({
+          buffer: file.buffer,
+          mimeType,
+          originalName: file.originalname,
+        }),
+      );
+
+      const healthDoc = await this.prisma.healthDocument.create({
+        data: {
+          userId,
+          title: file.originalname,
+          category: HealthDocumentCategory.OTHER,
+          fileUrl: saved.publicUrl,
+          storagePath: saved.storagePath,
+          mimeType,
           byteSize: file.size,
           extractStatus: extracted.status as ExtractStatus,
           extractedText: extracted.text,
@@ -219,7 +297,7 @@ export class ConversationsService {
           messageId: userMessage.id,
           kind: AttachmentKind.DOCUMENT,
           originalName: file.originalname,
-          mimeType: file.mimetype,
+          mimeType,
           byteSize: file.size,
           storagePath: saved.storagePath,
           publicUrl: saved.publicUrl,
@@ -232,7 +310,7 @@ export class ConversationsService {
       savedAttachments.push(row);
       attachmentInputs.push({
         kind: 'DOCUMENT',
-        mimeType: file.mimetype,
+        mimeType,
         originalName: file.originalname,
         extractedText: extracted.text,
         extractStatus: extracted.status,
@@ -258,16 +336,20 @@ export class ConversationsService {
       message: string;
       actions: Array<Record<string, unknown>>;
       model: string;
+      agent?: string;
+      routedTo?: string[];
     };
 
     try {
-      aiResult = await this.medicalAiService.chat({
-        userId,
-        userMessage: content || displayContent,
-        history: historyForAi,
-        conversationType: conversation.type,
-        attachments: attachmentInputs,
-      });
+      aiResult = await runWithChatOpenAi(() =>
+        this.medicalAiService.chat({
+          userId,
+          userMessage: content || displayContent,
+          history: historyForAi,
+          conversationType: conversation.type,
+          attachments: attachmentInputs,
+        }),
+      );
     } catch (error) {
       const errMessage =
         error instanceof Error ? error.message : 'AI request failed';
@@ -303,6 +385,8 @@ export class ConversationsService {
         metadata: {
           actions: aiResult.actions,
           model: aiResult.model,
+          agent: aiResult.agent ?? 'MAIN',
+          routedTo: aiResult.routedTo ?? [],
           conversationType: conversation.type,
           attachmentCount: savedAttachments.length,
         } as Prisma.InputJsonValue,
@@ -328,37 +412,41 @@ export class ConversationsService {
     };
   }
 
+  /** Any file type accepted; size only. */
   private assertAllowedImage(file: Express.Multer.File) {
-    if (!file.mimetype?.startsWith('image/')) {
-      throw new BadRequestException(
-        `File ${file.originalname} is not an image`,
-      );
-    }
     if (file.size > 8 * 1024 * 1024) {
       throw new BadRequestException('Image must be <= 8MB');
     }
   }
 
+  /** Any file type accepted; size only. */
   private assertAllowedDocument(file: Express.Multer.File) {
-    const allowed = [
-      'application/pdf',
-      'text/plain',
-      'text/markdown',
-      'text/csv',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    ];
-    const ok =
-      allowed.includes(file.mimetype) ||
-      /\.(pdf|txt|md|csv|doc|docx)$/i.test(file.originalname);
-    if (!ok) {
-      throw new BadRequestException(
-        `Unsupported document type: ${file.mimetype || file.originalname}`,
-      );
-    }
     if (file.size > 15 * 1024 * 1024) {
       throw new BadRequestException('Document must be <= 15MB');
     }
+  }
+
+  /** Prefer client MIME; if missing/octet-stream, guess from filename. */
+  private resolveMime(file: Express.Multer.File): string {
+    const mime = (file.mimetype || '').toLowerCase().trim();
+    if (mime && mime !== 'application/octet-stream') return mime;
+    const name = (file.originalname || '').toLowerCase();
+    if (/\.jpe?g$/i.test(name)) return 'image/jpeg';
+    if (name.endsWith('.png')) return 'image/png';
+    if (name.endsWith('.gif')) return 'image/gif';
+    if (name.endsWith('.webp')) return 'image/webp';
+    if (name.endsWith('.heic')) return 'image/heic';
+    if (name.endsWith('.heif')) return 'image/heif';
+    if (name.endsWith('.bmp')) return 'image/bmp';
+    if (name.endsWith('.pdf')) return 'application/pdf';
+    if (name.endsWith('.txt')) return 'text/plain';
+    if (name.endsWith('.md')) return 'text/markdown';
+    if (name.endsWith('.csv')) return 'text/csv';
+    if (name.endsWith('.doc')) return 'application/msword';
+    if (name.endsWith('.docx')) {
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
+    return mime || 'application/octet-stream';
   }
 
   private async getOwnedConversation(userId: string, conversationId: string) {

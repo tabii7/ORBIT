@@ -6,11 +6,14 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { SocialTokenService } from './services/social-token.service';
+import { BrevoMailService } from './services/brevo-mail.service';
 import { UsersModule } from '../users/users.module';
+import { DevicesModule } from '../devices/devices.module';
 
 @Module({
   imports: [
     UsersModule,
+    DevicesModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -30,7 +33,7 @@ import { UsersModule } from '../users/users.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, SocialTokenService],
-  exports: [AuthService, JwtModule],
+  providers: [AuthService, JwtStrategy, SocialTokenService, BrevoMailService],
+  exports: [AuthService, JwtModule, BrevoMailService],
 })
 export class AuthModule {}

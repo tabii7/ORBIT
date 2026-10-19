@@ -4,9 +4,10 @@ import {
   IsOptional,
   IsString,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
+import { DevicePlatform, Role } from '@prisma/client';
 
 export class RegisterDto {
   @ApiProperty({ example: 'user@orbit.local' })
@@ -31,4 +32,22 @@ export class RegisterDto {
   @IsOptional()
   @IsEnum(Role)
   role?: Role;
+
+  @ApiPropertyOptional({
+    example: 'dGVzdC1mY20tdG9rZW4tZXhhbXBsZQ',
+    description: 'FCM push token for this device (saved on register)',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  fcmToken?: string;
+
+  @ApiPropertyOptional({
+    enum: DevicePlatform,
+    example: DevicePlatform.ANDROID,
+    description: 'Device platform — required when fcmToken is sent',
+  })
+  @ValidateIf((o: RegisterDto) => Boolean(o.fcmToken))
+  @IsEnum(DevicePlatform)
+  platform?: DevicePlatform;
 }

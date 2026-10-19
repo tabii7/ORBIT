@@ -102,7 +102,13 @@ export class ChatJsonBodyDto {
   @ApiPropertyOptional({
     enum: ConversationType,
     example: ConversationType.MEDICAL,
-    description: 'Only used when starting a new conversation',
+    description: 'Legacy — prefer omit. AI routes by message content.',
   })
   type?: ConversationType;
+
+  @ApiPropertyOptional({
+    example: 'cmfolder…',
+    description: 'Optional folder for a new chat (e.g. Travel)',
+  })
+  folderId?: string;
 }

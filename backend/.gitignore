@@ -9,6 +9,9 @@ coverage
 .env
 .env.local
 
+# Firebase Admin private key (never commit)
+config/firebase-service-account.json
+
 # Logs / OS
 *.log
 .DS_Store

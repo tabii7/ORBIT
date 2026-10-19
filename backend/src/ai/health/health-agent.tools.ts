@@ -10,7 +10,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RemindersService } from '../../reminders/reminders.service';
 import { SymptomsService } from '../../symptoms/symptoms.service';
 import { HealthDocumentsService } from '../../health-documents/health-documents.service';
-import { resolveRemindAt } from '../../common/time/remind-at';
+import { resolveRemindAt, normalizeTimesOfDay } from '../../common/time/remind-at';
 
 export type HealthAgentAction = Record<string, unknown>;
 
@@ -130,6 +130,7 @@ export function createHealthAgentTools(deps: {
         APPOINTMENT: ReminderType.APPOINTMENT,
         TASK: ReminderType.TASK,
         GENERAL: ReminderType.GENERAL,
+        TRAVEL: ReminderType.TRAVEL,
       };
       const key = input.type?.toUpperCase();
       const type = key ? typeMap[key] : undefined;
@@ -149,10 +150,12 @@ export function createHealthAgentTools(deps: {
             'APPOINTMENT',
             'TASK',
             'GENERAL',
+            'TRAVEL',
             'medicine',
             'appointment',
             'task',
             'general',
+            'travel',
           ])
           .optional(),
       }),
@@ -177,29 +180,70 @@ export function createHealthAgentTools(deps: {
         (input.recurrence?.toUpperCase() as ReminderRecurrence) ||
         ReminderRecurrence.ONCE;
 
+      const medicineNames = (
+        input.medicine_names?.length
+          ? input.medicine_names
+          : input.medicine_name
+            ? [input.medicine_name]
+            : []
+      )
+        .map((n) => n.trim())
+        .filter(Boolean);
+
+      if (!medicineNames.length) {
+        return JSON.stringify({
+          ok: false,
+          error: 'At least one medicine name is required',
+        });
+      }
+
+      const medicineName = medicineNames.join(', ');
+      const title =
+        input.title?.trim() ||
+        (medicineNames.length > 1
+          ? `Take ${medicineNames.join(' & ')}`
+          : `Take ${medicineName}`);
+
+      // Relative delay ("after 1 minute") wins. Never invent clock times for that.
+      const inMinutes =
+        typeof input.in_minutes === 'number' ? input.in_minutes : undefined;
+      const timesOfDay =
+        inMinutes !== undefined
+          ? []
+          : normalizeTimesOfDay(input.times_of_day ?? []);
+
       const remindAt = resolveRemindAt({
-        remindAtIso: input.remind_at_iso,
-        timesOfDay: input.times_of_day,
+        inMinutes,
+        remindAtIso:
+          inMinutes !== undefined || timesOfDay.length
+            ? undefined
+            : input.remind_at_iso,
+        timesOfDay: timesOfDay.length ? timesOfDay : undefined,
         timezone,
       });
 
       const reminder = await remindersService.createMedicineReminder(userId, {
-        title: input.title,
-        medicineName: input.medicine_name,
+        title,
+        medicineName,
         dosage: input.dosage,
-        description: input.description,
+        description:
+          input.description ??
+          (medicineNames.length > 1
+            ? `Medicines: ${medicineNames.join(', ')}`
+            : undefined),
         remindAt,
-        recurrence,
-        timesOfDay: input.times_of_day ?? [],
+        recurrence: inMinutes !== undefined ? ReminderRecurrence.ONCE : recurrence,
+        timesOfDay,
         timezone,
       });
 
       const current = await prisma.medicalProfile.findUnique({
         where: { userId },
       });
-      const meds = uniqueMerge(current?.currentMedications ?? [], [
-        input.medicine_name,
-      ]);
+      const meds = uniqueMerge(
+        current?.currentMedications ?? [],
+        medicineNames,
+      );
       await prisma.medicalProfile.upsert({
         where: { userId },
         create: { userId, currentMedications: meds },
@@ -213,6 +257,7 @@ export function createHealthAgentTools(deps: {
           type: reminder.type,
           title: reminder.title,
           medicineName: reminder.medicineName,
+          medicines: medicineNames,
           remindAt: reminder.remindAt,
           recurrence: reminder.recurrence,
           timesOfDay: reminder.timesOfDay,
@@ -222,7 +267,10 @@ export function createHealthAgentTools(deps: {
       return JSON.stringify({
         ok: true,
         reminderId: reminder.id,
+        medicineName: reminder.medicineName,
+        medicines: medicineNames,
         remindAt: reminder.remindAt,
+        timesOfDay: reminder.timesOfDay,
         recurrence: reminder.recurrence,
         timezone,
       });
@@ -230,14 +278,45 @@ export function createHealthAgentTools(deps: {
     {
       name: 'create_medicine_reminder',
       description:
-        'Create a medicine reminder when the user mentions medicine schedule/times.',
+        'Create ONE medicine reminder. Same-time multiple meds → one call with medicine_names. For clock times use times_of_day. For relative delays ("in 1 minute", "after 10 minutes") use in_minutes ONLY — do not set times_of_day.',
       schema: z.object({
-        title: z.string(),
-        medicine_name: z.string(),
+        title: z
+          .string()
+          .optional()
+          .describe('Optional; defaults from medicine names'),
+        medicine_name: z
+          .string()
+          .optional()
+          .describe('Single medicine name (use medicine_names for several)'),
+        medicine_names: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'All medicines for this same reminder time, e.g. ["Panadol","Cough syrup"]',
+          ),
         dosage: z.string().optional(),
         description: z.string().optional(),
-        remind_at_iso: z.string().optional(),
-        times_of_day: z.array(z.string()).optional(),
+        in_minutes: z
+          .number()
+          .int()
+          .min(0)
+          .max(60 * 24 * 30)
+          .optional()
+          .describe(
+            'Relative delay from now in minutes. Use for "after 1 minute" / "in 10 minutes". Do NOT combine with times_of_day.',
+          ),
+        remind_at_iso: z
+          .string()
+          .optional()
+          .describe(
+            'Absolute ISO datetime. Prefer times_of_day for clock times, in_minutes for relative.',
+          ),
+        times_of_day: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Clock times only, e.g. ["15:00"] or ["3pm"]. Never use for "after N minutes".',
+          ),
         recurrence: z
           .enum(['ONCE', 'DAILY', 'WEEKLY', 'once', 'daily', 'weekly'])
           .optional(),
@@ -245,10 +324,82 @@ export function createHealthAgentTools(deps: {
     },
   );
 
+  const createGeneralReminder = tool(
+    async (input) => {
+      const inMinutes =
+        typeof input.in_minutes === 'number' ? input.in_minutes : undefined;
+      const timesOfDay =
+        inMinutes !== undefined
+          ? []
+          : normalizeTimesOfDay(input.times_of_day ?? []);
+
+      const remindAt = resolveRemindAt({
+        inMinutes,
+        remindAtIso:
+          inMinutes !== undefined || timesOfDay.length
+            ? undefined
+            : input.remind_at_iso,
+        timesOfDay: timesOfDay.length ? timesOfDay : undefined,
+        timezone,
+      });
+
+      const reminder = await remindersService.createReminder(userId, {
+        type: ReminderType.TASK,
+        title: input.title,
+        description: input.description,
+        remindAt,
+        recurrence: ReminderRecurrence.ONCE,
+        timesOfDay,
+        timezone,
+      });
+
+      actions.push({
+        type: 'REMINDER_CREATED',
+        data: {
+          id: reminder.id,
+          type: reminder.type,
+          title: reminder.title,
+          remindAt: reminder.remindAt,
+          timesOfDay: reminder.timesOfDay,
+          inMinutes,
+        },
+      });
+
+      return JSON.stringify({
+        ok: true,
+        reminderId: reminder.id,
+        remindAt: reminder.remindAt,
+        timesOfDay: reminder.timesOfDay,
+        timezone,
+      });
+    },
+    {
+      name: 'create_general_reminder',
+      description:
+        'Create a general/task reminder (not medicine). Use for "remind me after 1 minute", boiled water, etc. Prefer in_minutes for relative delays.',
+      schema: z.object({
+        title: z.string(),
+        description: z.string().optional(),
+        in_minutes: z
+          .number()
+          .int()
+          .min(0)
+          .max(60 * 24 * 30)
+          .optional()
+          .describe('Minutes from now. "after 1 minute" → 1'),
+        remind_at_iso: z.string().optional(),
+        times_of_day: z.array(z.string()).optional(),
+      }),
+    },
+  );
+
   const createAppointmentReminder = tool(
     async (input) => {
+      const inMinutes =
+        typeof input.in_minutes === 'number' ? input.in_minutes : undefined;
       const remindAt = resolveRemindAt({
-        remindAtIso: input.remind_at_iso,
+        inMinutes,
+        remindAtIso: inMinutes !== undefined ? undefined : input.remind_at_iso,
         timezone,
       });
 
@@ -285,8 +436,15 @@ export function createHealthAgentTools(deps: {
       schema: z.object({
         title: z.string(),
         description: z.string().optional(),
+        in_minutes: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Relative delay in minutes from now'),
         remind_at_iso: z
           .string()
+          .optional()
           .describe('ISO datetime for the appointment reminder'),
       }),
     },
@@ -582,6 +740,7 @@ export function createHealthAgentTools(deps: {
     listReminders,
     listDueReminders,
     createMedicineReminder,
+    createGeneralReminder,
     createAppointmentReminder,
     updateReminder,
     cancelReminder,

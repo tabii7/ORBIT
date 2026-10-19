@@ -1,0 +1,38 @@
+---
+description: ORBIT backend — OpenAI cost & usage hard rules (always apply)
+alwaysApply: true
+---
+
+# ORBIT — OpenAI & cost rules
+
+## OpenAI usage (mandatory)
+
+- **OpenAI ONLY inside `POST /api/chat`.** Never from crons, background jobs, startup hooks, or “helpful” polling.
+- Enforce via `runWithChatOpenAi` / `assertChatOpenAiAllowed` in [`backend/src/ai/openai-chat-scope.ts`](backend/src/ai/openai-chat-scope.ts). Any new OpenAI call site must assert this (or only run under that scope).
+- Do **not** add REST endpoints that call OpenAI directly (e.g. `/business/research` is closed on purpose).
+- Vision OCR for chat uploads (images / scanned PDFs) is allowed **only** inside `POST /api/chat` (same chat scope). Never as a background job.
+
+## Finance / ADX / market data (mandatory)
+
+- **Chat-only web search is allowed** for live quotes, market news, and highlights when the user asks in `POST /api/chat` (`FinanceSearchService` + `assertChatOpenAiAllowed`).
+- Finance alert **auto-polling / crons remain CLOSED**. Do not re-enable minute/hourly OpenAI quote loops.
+- Watchlist + alerts may be **stored** without background price checks.
+- Prefer a dedicated market-data vendor later if the user provides a key; until then chat web_search is OK for on-demand asks only.
+- Never invent prices or source URLs — use tool results.
+
+## Crons
+
+- Reminder / Daily Summary / FCM crons: OK if they do **not** call OpenAI.
+- Never schedule OpenAI calls on `@Cron` (minute/hourly/etc.).
+
+## Before shipping AI features
+
+1. Ask: does this run without a user chat message? If yes → **no OpenAI**.
+2. Prefer cheap models only when the user explicitly wants chat quality/cost tradeoffs — never burn tokens in loops.
+3. Do not invent “temporary” OpenAI polling for price alerts.
+
+## Product direction reminder
+
+- Chat-first: domain agents under Main router; tools save data.
+- Travel hotel/flight search and Finance live market lookup both use chat web_search — never cron.
+- Next unfinished big slices (when asked): Support Centre, Multi-AI Gateway.

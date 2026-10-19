@@ -31,14 +31,14 @@ This plan maps the Executive Proposal (“AI Personal Business, Life & Health Ma
 | Health agent (GPT tools) | Done (single-provider; reads chat attachments) |
 | Reminders CRUD + due + dose logs | Done |
 | Symptoms diary | Done |
-| Health document **metadata** + chat upload extract | Partial (PDF/TXT extract via chat; OCR for scans not yet) |
+| Health document **metadata** + chat upload extract | Done for chat: PDF/TXT local + vision OCR for images/scanned PDFs (chat-only) |
 | Device token registration | Done (no FCM send yet) |
-| Personal productivity (general tasks) | Partial (reminders only; no tasks/calendar/daily plan) |
-| Business module | Not started |
-| Travel & trips | Not started |
-| Finance & ADX | Not started |
+| Personal productivity (general tasks) | v1 done (tasks, calendar, daily plan + productivity agent) |
+| Business module | v1 done (notes/checklists, business tasks, research + business agent) |
+| Travel & trips | Preferences API + chat hotel/flight web search (booking links) + TRAVEL reminders |
+| Finance & ADX | v1 budget/watchlist/alerts storage; OpenAI market web_search removed (awaits vendor API key) |
 | Document intelligence (any doc type) | Not started |
-| Daily Summary / notification fan-out | Not started |
+| Daily Summary / notification fan-out | v1 done (GET/generate + 07:00 TZ cron + soft FCM; critical still via reminder/finance) |
 | Support Centre | Not started |
 | Multi-AI Gateway (Claude/GPT/Kimi) | Not started (OpenAI only) |
 | EHS / SEHA | Not started (explore + portal fallback) |
@@ -129,57 +129,76 @@ PostgreSQL (+ object storage for files)
 
 ### 5.2 Personal Productivity — §10
 
+**Done (v1):**
+
 | Feature | API / behavior |
 |---------|----------------|
-| Tasks | CRUD + chat tools (`create_task`, `complete_task`, `list_tasks`) |
-| Reminders | Extend beyond health (already general types exist) |
-| Calendar events | CRUD + “remind me 2h before” |
-| Daily planning | Chat: “organize my day” → propose ordered plan from tasks/events |
-| Follow-ups | Task subtype or linked reminders |
+| Tasks | `Task` model + `/api/productivity/tasks` + chat tools |
+| Calendar events | `CalendarEvent` + `/api/productivity/calendar`; `remindMinutesBefore` → TASK reminder/FCM |
+| Daily planning | `GET /api/productivity/daily-plan` + chat `organize_my_day` |
+| Agent | Main → `PRODUCTIVITY` → ProductivityAgentService |
 
-**DB:** `Task`, `CalendarEvent` (or unify under `Reminder` + `Task`).
+**Google Calendar (backend):** connect/sync/disconnect under `/api/productivity/calendar/google/*`; ORBIT events stay source of truth for chat; two-way push when linked. Needs `GOOGLE_CLIENT_SECRET` + Calendar API enabled.
+
+**Later:** richer follow-up subtypes; Daily Summary digest (§5.8).
 
 ### 5.3 Business Management — §11
 
-Conversational assistance (not full ERP):
+Conversational assistance (not full ERP).
 
-- Business tasks / reminders / notes
-- Business documents (link to Document Intelligence)
-- Research summaries (via Gateway; cite sources where possible)
-- Business planning checklists stored as structured notes
+**Done (v1):**
 
-**DB:** `BusinessNote`, reuse Task/Reminder with `context=BUSINESS`, or `tag`.
+| Item | Detail |
+|------|--------|
+| Notes / checklists | `BusinessNote` (`NOTE`\|`CHECKLIST`\|`RESEARCH`\|`PLAN`) + `GET/POST/PATCH/DELETE /api/business/notes` |
+| Business tasks | Reuse `Task` with `context=BUSINESS` + `/api/business/tasks` |
+| Research | `POST /api/business/research` (OpenAI `web_search`; optional RESEARCH note) |
+| Agent | Main → `BUSINESS` → BusinessAgentService |
+| Docs | `backend/BUSINESS.md` |
+
+**Later:** business documents (Document Intelligence); richer CRM-style reminders.
 
 ### 5.4 Travel & Trips — §12–15
 
-**Principle:** search → compare → user selects → smart confirmation → **external booking URL** (no payment in-app).
+**Principle:** search → compare → user selects → **external booking URL** (no payment in-app).
 
-| Step | Backend |
-|------|---------|
-| Parse request | origin, dest, dates, budget, pax |
-| Multi-source search | Adapter interface: Provider A/B (Amadeus, Duffel, etc. — finalize commercially) |
-| Compare | Normalize offers; sort by price/duration |
-| Present | `TravelSearch` + `TravelOffer` records |
-| Confirm | `TravelSelection` summary payload for UI |
-| Handoff | Return deep link / booking URL only |
+**Done (v1 + compare/trip):**
+
+| Item | Detail |
+|------|--------|
+| Preferences | `GET/PUT /api/travel/preferences` (also on `GET /api/profile` as `travel`) |
+| Unified chat | Same `POST /api/chat` — Main router → Health / Travel sub-agents |
+| Hotel / flight search | OpenAI Responses `web_search` → real booking page links in Markdown |
+| Compare / recommend | Score vs prefs (budget, stars, airlines, stops); persist ranked `TravelOffer` |
+| Trip plans | `Trip` model + `GET/POST/PATCH/DELETE /api/travel/trips`; select hotel/flight offer |
+| Chat tools | Travel agent: `plan_trip`, `create_trip`, `list_trips`, `get_trip`, `select_trip_offer` |
+| Reminders | `ReminderType.TRAVEL` via `create_travel_reminder` tool |
+
+**Agents:** Main (`src/ai/main`) classifies domains; Health and Travel each have their own prompt + tools. New domains = new sub-agent + router branch.
+
+**Env:** `OPENAI_API_KEY` (same key as chat). Optional `OPENAI_SEARCH_MODEL`.
 
 **No:** auto-book, store card data, charge users.
+
+**Later:** commercial APIs (Amadeus/Duffel), richer compare UI cards on client.
 
 ### 5.5 Finance & ADX — §16–17
 
 **Information only — no trade execution.**
 
-| Feature | Notes |
-|---------|--------|
-| Budget / expenses | User-entered + chat extraction |
-| Summaries | Spend by category |
-| ADX market data | Via approved vendor/API after licensing check |
-| Watchlists + smart alerts | Thresholds → notification / Daily Summary |
-| News | Aggregated informational feed |
+**Done (v1):**
 
-**Pre-dev gate:** verify ADX API/licensing (real-time vs delayed).
+| Item | Detail |
+|------|--------|
+| Budget / expenses | `BudgetEntry` + `GET/POST/DELETE /api/finance/budget` + summary |
+| Watchlists | `WatchlistItem` + `/api/finance/watchlist` |
+| Price alerts | `FinanceAlert` stored only — auto poll/FCM via OpenAI **removed** |
+| Unified chat | Main router → `FinanceAgentService` (`FINANCE` domain) — budget/watchlist tools |
+| Quotes / news / research | **Removed** from OpenAI web_search |
 
-**Hard block:** buy/sell/transfer/execute trades.
+**No:** auto-trade, brokerage credentials, payments, OpenAI for ADX/prices/news.
+
+**Later:** dedicated market-data API key (user-provided) for quotes/alerts; not web search.
 
 ### 5.6 Basic Health — §18–20
 
@@ -189,7 +208,7 @@ Conversational assistance (not full ERP):
 |------|------|
 | Medicine / appointment reminders | Done |
 | Document storage metadata | Done |
-| PDF text extract + “what does my report say?” | Document Intelligence pipeline |
+| PDF/image extract + “what does my report say?” | Chat upload vision/text extract done; full Document Intelligence (search/tags) later |
 | EHS / SEHA | Phase: research APIs → integrate if approved; else portal links + upload fallback |
 | Safety | Keep non-diagnostic stance (already in agent prompt) |
 
@@ -206,10 +225,15 @@ Health-specific Q&A from §19 depends on this.
 
 ### 5.8 Notifications & Daily Summary — §22
 
-- Cron (e.g. 07:00 user TZ): assemble appointments, tasks, health meds, travel, finance alerts
-- `GET /api/daily-summary?date=`
-- FCM for critical; soft items only in summary
-- Chat: “What’s my daily summary?”
+**Done (v1):**
+
+| Item | Detail |
+|------|--------|
+| Assemble | Reminders today, calendar, due/overdue tasks, upcoming trips, active finance alerts |
+| API | `GET /api/daily-summary?date=`, `POST /api/daily-summary/generate?push=` |
+| Cron | ~07:00 user TZ (`DAILY_SUMMARY_HOUR` / `MINUTE`) → generate + soft FCM |
+| Chat | Productivity tool `get_daily_summary` |
+| Critical FCM | Still reminder cron + finance alert cron (not batched into digest) |
 
 ### 5.9 Support Centre — §28
 

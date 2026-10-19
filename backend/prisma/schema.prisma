@@ -52,6 +52,7 @@ enum ReminderType {
   APPOINTMENT
   TASK
   GENERAL
+  TRAVEL
 }
 
 enum ReminderRecurrence {
@@ -91,28 +92,121 @@ enum ExtractStatus {
   SKIPPED
 }
 
+enum TravelCabinClass {
+  ECONOMY
+  PREMIUM_ECONOMY
+  BUSINESS
+  FIRST
+}
+
+enum TravelOfferKind {
+  HOTEL
+  FLIGHT
+}
+
+enum TripStatus {
+  DRAFT
+  PLANNED
+  READY_TO_BOOK
+  CANCELLED
+}
+
+enum BudgetEntryType {
+  INCOME
+  EXPENSE
+}
+
+enum FinanceMarket {
+  ADX
+  OTHER
+}
+
+enum FinanceAlertCondition {
+  ABOVE
+  BELOW
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TaskContext {
+  PERSONAL
+  BUSINESS
+}
+
+enum BusinessNoteKind {
+  NOTE
+  CHECKLIST
+  RESEARCH
+  PLAN
+}
+
+enum EmailOtpPurpose {
+  REGISTER
+}
+
 model User {
-  id              String           @id @default(cuid())
-  email           String           @unique
-  passwordHash    String?
-  fullName        String
-  avatarUrl       String?
-  role            Role             @default(USER)
-  isActive        Boolean          @default(true)
-  marketingOptIn  Boolean          @default(false)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  socialAccounts  SocialAccount[]
-  profile         UserProfile?
-  medicalProfile  MedicalProfile?
-  conversations   Conversation[]
-  reminders       Reminder[]
-  reminderLogs    ReminderLog[]
-  symptomEntries  SymptomEntry[]
-  healthDocuments HealthDocument[]
-  deviceTokens    DeviceToken[]
+  id               String           @id @default(cuid())
+  email            String           @unique
+  passwordHash     String?
+  fullName         String
+  avatarUrl        String?
+  role             Role             @default(USER)
+  isActive         Boolean          @default(true)
+  emailVerifiedAt  DateTime?
+  marketingOptIn   Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  socialAccounts   SocialAccount[]
+  profile          UserProfile?
+  medicalProfile   MedicalProfile?
+  conversations    Conversation[]
+  chatFolders      ChatFolder[]
+  reminders        Reminder[]
+  reminderLogs     ReminderLog[]
+  symptomEntries   SymptomEntry[]
+  healthDocuments  HealthDocument[]
+  deviceTokens     DeviceToken[]
+  travelPreferences TravelPreferences?
+  trips             Trip[]
+  travelOffers      TravelOffer[]
+  budgetEntries     BudgetEntry[]
+  watchlistItems    WatchlistItem[]
+  financeAlerts     FinanceAlert[]
+  tasks             Task[]
+  calendarEvents    CalendarEvent[]
+  googleCalendar    GoogleCalendarConnection?
+  dailySummaries    DailySummary[]
+  businessNotes     BusinessNote[]
 
   @@map("users")
+}
+
+/// Pending email OTP (e.g. register). Payload holds signup fields until verified.
+model EmailOtp {
+  id        String          @id @default(cuid())
+  email     String
+  purpose   EmailOtpPurpose
+  codeHash  String
+  payload   Json?
+  expiresAt DateTime
+  attempts  Int             @default(0)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@unique([email, purpose])
+  @@index([expiresAt])
+  @@map("email_otps")
 }
 
 model SocialAccount {
@@ -138,11 +232,17 @@ model UserProfile {
   timezone    String             @default("Asia/Dubai")
   bio         String?
   dateOfBirth DateTime?
+  age         Int?
   gender      String?
   language    String             @default("en")
   country     String?
   city        String?
+  residence   String?
+  currency    String?
+  hobby       String?
   interests   InterestCategory[] @default([])
+  /// Category → multiple values, e.g. { "travel": ["beach","family"], "food": ["halal"] }
+  preferences Json               @default("{}")
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
 
@@ -168,10 +268,28 @@ model MedicalProfile {
   @@map("medical_profiles")
 }
 
+/// Sidebar folder (ChatGPT-style) — organization only; AI routing is unchanged.
+model ChatFolder {
+  id            String         @id @default(cuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  sortOrder     Int            @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  conversations Conversation[]
+
+  @@index([userId, sortOrder])
+  @@unique([userId, name])
+  @@map("chat_folders")
+}
+
 model Conversation {
   id        String           @id @default(cuid())
   userId    String
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folderId  String?
+  folder    ChatFolder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
   title     String?
   type      ConversationType @default(MEDICAL)
   createdAt DateTime         @default(now())
@@ -179,6 +297,7 @@ model Conversation {
   messages  Message[]
 
   @@index([userId, updatedAt])
+  @@index([userId, folderId])
   @@map("conversations")
 }
 
@@ -309,4 +428,236 @@ model DeviceToken {
   @@unique([userId, token])
   @@index([userId])
   @@map("device_tokens")
+}
+
+/// User travel defaults used by chat when searching hotels/flights.
+model TravelPreferences {
+  id                   String           @id @default(cuid())
+  userId               String           @unique
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  homeCity             String?
+  homeCountry          String?
+  homeAirport          String?
+  preferredCurrency    String           @default("AED")
+  maxHotelBudget       Float?
+  maxFlightBudget      Float?
+  preferredHotelStars  Int?
+  preferredAirlines    String[]         @default([])
+  cabinClass           TravelCabinClass @default(ECONOMY)
+  preferRefundable     Boolean          @default(false)
+  adultsDefault        Int              @default(1)
+  notes                String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  @@map("travel_preferences")
+}
+
+/// Saved trip plan (itinerary shell for flights/hotels).
+model Trip {
+  id            String     @id @default(cuid())
+  userId        String
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  destination   String
+  origin        String?
+  startDate     DateTime?
+  endDate       DateTime?
+  adults        Int        @default(1)
+  budget        Float?
+  currency      String     @default("AED")
+  status        TripStatus @default(DRAFT)
+  notes         String?
+  selectedHotelOfferId  String?
+  selectedFlightOfferId String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  offers        TravelOffer[]
+
+  @@index([userId, createdAt])
+  @@index([userId, status])
+  @@map("trips")
+}
+
+/// Normalized hotel/flight option from search (for compare + recommend + trip link).
+model TravelOffer {
+  id              String          @id @default(cuid())
+  userId          String
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tripId          String?
+  trip            Trip?           @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  kind            TravelOfferKind
+  title           String
+  bookingUrl      String
+  snippet         String?
+  source          String?
+  price           Float?
+  currency        String?
+  stars           Int?
+  airline         String?
+  durationMinutes Int?
+  stops           Int?
+  score           Float?
+  isRecommended   Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([userId, kind, createdAt])
+  @@index([tripId])
+  @@map("travel_offers")
+}
+
+model BudgetEntry {
+  id         String          @id @default(cuid())
+  userId     String
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       BudgetEntryType
+  category   String
+  amount     Float
+  currency   String          @default("AED")
+  note       String?
+  occurredAt DateTime        @default(now())
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([userId, occurredAt])
+  @@index([userId, type, category])
+  @@map("budget_entries")
+}
+
+model WatchlistItem {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  symbol      String
+  market      FinanceMarket    @default(OTHER)
+  displayName String?
+  notes       String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  alerts      FinanceAlert[]
+
+  @@unique([userId, symbol])
+  @@index([userId, market])
+  @@map("watchlist_items")
+}
+
+model FinanceAlert {
+  id              String                @id @default(cuid())
+  userId          String
+  user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  watchlistItemId String?
+  watchlistItem   WatchlistItem?        @relation(fields: [watchlistItemId], references: [id], onDelete: SetNull)
+  symbol          String
+  condition       FinanceAlertCondition
+  threshold       Float
+  currency        String?               @default("AED")
+  isActive        Boolean               @default(true)
+  lastTriggeredAt DateTime?
+  lastPrice       Float?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@index([userId, isActive])
+  @@index([symbol, isActive])
+  @@map("finance_alerts")
+}
+
+model Task {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(MEDIUM)
+  context     TaskContext  @default(PERSONAL)
+  dueAt       DateTime?
+  completedAt DateTime?
+  tags        String[]     @default([])
+  reminderId  String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([userId, status, dueAt])
+  @@index([userId, context, status])
+  @@index([userId, createdAt])
+  @@map("tasks")
+}
+
+model BusinessNote {
+  id             String           @id @default(cuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  body           String?
+  kind           BusinessNoteKind @default(NOTE)
+  /// Checklist items: [{ "text": "...", "done": false }]
+  checklistItems Json?
+  tags           String[]         @default([])
+  sourceUrls     String[]         @default([])
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([userId, kind, createdAt])
+  @@map("business_notes")
+}
+
+model CalendarEvent {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title            String
+  description      String?
+  location         String?
+  startAt          DateTime
+  endAt            DateTime?
+  allDay           Boolean  @default(false)
+  reminderId       String?
+  /// google | null (ORBIT-only)
+  externalProvider String?
+  externalEventId  String?
+  externalEtag     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([userId, externalProvider, externalEventId])
+  @@index([userId, startAt])
+  @@map("calendar_events")
+}
+
+/// Cached morning digest (one row per user per local calendar day).
+model DailySummary {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Local calendar date YYYY-MM-DD
+  date        String
+  timezone    String   @default("Asia/Dubai")
+  payload     Json
+  pushSentAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, createdAt])
+  @@map("daily_summaries")
+}
+
+/// Google Calendar OAuth tokens for a user (one primary calendar connection).
+model GoogleCalendarConnection {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  googleEmail  String?
+  calendarId   String    @default("primary")
+  accessToken  String?
+  refreshToken String
+  tokenExpiry  DateTime?
+  scopes       String?
+  lastSyncAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("google_calendar_connections")
 }

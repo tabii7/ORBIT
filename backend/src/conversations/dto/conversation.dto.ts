@@ -17,10 +17,19 @@ export class CreateConversationDto {
   @ApiPropertyOptional({
     enum: ConversationType,
     default: ConversationType.MEDICAL,
+    description: 'Legacy label only — AI routing ignores this. Prefer omit.',
   })
   @IsOptional()
   @IsEnum(ConversationType)
   type?: ConversationType;
+
+  @ApiPropertyOptional({
+    example: 'cmfolder…',
+    description: 'Optional chat folder id (e.g. Travel, Health)',
+  })
+  @IsOptional()
+  @IsString()
+  folderId?: string;
 }
 
 /** @deprecated Prefer ChatDto via POST /api/chat */
@@ -68,9 +77,19 @@ export class ChatDto {
   @ApiPropertyOptional({
     enum: ConversationType,
     default: ConversationType.MEDICAL,
-    description: 'Used only when creating a new conversation',
+    description:
+      'Legacy label only when creating a chat — AI routes by message. Prefer omit.',
   })
   @IsOptional()
   @IsEnum(ConversationType)
   type?: ConversationType;
+
+  @ApiPropertyOptional({
+    example: 'cmfolder…',
+    description:
+      'Optional. Put a new chat into this folder. Ignored when continuing an existing conversation.',
+  })
+  @IsOptional()
+  @IsString()
+  folderId?: string;
 }
