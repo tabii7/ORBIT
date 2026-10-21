@@ -12,6 +12,7 @@ export const ApiCode = {
   REGISTER_SUCCESS: 'REGISTER_SUCCESS',
   SOCIAL_LOGIN_SUCCESS: 'SOCIAL_LOGIN_SUCCESS',
   OTP_SENT: 'OTP_SENT',
+  PASSWORD_RESET_SUCCESS: 'PASSWORD_RESET_SUCCESS',
   UNAUTHORIZED: 'UNAUTHORIZED',
   FORBIDDEN: 'FORBIDDEN',
 
@@ -71,6 +72,7 @@ export const ApiCode = {
   CONVERSATION_UPDATED: 'CONVERSATION_UPDATED',
   CONVERSATION_LIST: 'CONVERSATION_LIST',
   SUPPORT_CONTACT_SENT: 'SUPPORT_CONTACT_SENT',
+  HEALTH_CHECK_SUBMITTED: 'HEALTH_CHECK_SUBMITTED',
 
   // Errors
   BAD_REQUEST: 'BAD_REQUEST',
@@ -93,6 +95,7 @@ export const DEFAULT_SUCCESS_MESSAGE: Record<string, string> = {
   [ApiCode.REGISTER_SUCCESS]: 'Registration successful',
   [ApiCode.SOCIAL_LOGIN_SUCCESS]: 'Social login successful',
   [ApiCode.OTP_SENT]: 'Verification code sent to your email',
+  [ApiCode.PASSWORD_RESET_SUCCESS]: 'Password reset successfully',
   [ApiCode.REMINDER_CREATED]: 'Reminder created successfully',
   [ApiCode.REMINDER_UPDATED]: 'Reminder updated successfully',
   [ApiCode.REMINDER_DELETED]: 'Reminder deleted successfully',
@@ -148,6 +151,7 @@ export const DEFAULT_SUCCESS_MESSAGE: Record<string, string> = {
   [ApiCode.CONVERSATION_UPDATED]: 'Conversation updated successfully',
   [ApiCode.CONVERSATION_LIST]: 'Conversations fetched successfully',
   [ApiCode.SUPPORT_CONTACT_SENT]: 'Support message sent successfully',
+  [ApiCode.HEALTH_CHECK_SUBMITTED]: 'Health check submitted successfully',
 };
 
 export function errorCodeFromStatus(status: number): ApiCodeType {

@@ -13,6 +13,7 @@ import { TravelPreferencesService } from '../../travel/travel-preferences.servic
 import { TravelSearchService } from '../../travel/travel-search.service';
 import { TravelCompareService } from '../../travel/travel-compare.service';
 import { TravelTripService } from '../../travel/travel-trip.service';
+import { TravelPlannerService } from '../../travel/travel-planner.service';
 import { UpdateTravelPreferencesDto } from '../../travel/dto/travel-preferences.dto';
 
 export type TravelAgentAction = Record<string, unknown>;
@@ -50,6 +51,7 @@ export function createTravelAgentTools(deps: {
   travelSearchService: TravelSearchService;
   travelCompareService: TravelCompareService;
   travelTripService: TravelTripService;
+  travelPlannerService: TravelPlannerService;
   remindersService: RemindersService;
   actions: TravelAgentAction[];
 }) {
@@ -60,6 +62,7 @@ export function createTravelAgentTools(deps: {
     travelSearchService,
     travelCompareService,
     travelTripService,
+    travelPlannerService,
     remindersService,
     actions,
   } = deps;
@@ -196,23 +199,30 @@ export function createTravelAgentTools(deps: {
           rank: r.rank,
           offerId: r.offerId,
           title: r.title,
+          provider: r.provider,
+          url: r.url || r.bookingUrl,
           bookingUrl: r.bookingUrl,
           snippet: r.snippet,
+          priceEstimate: r.priceEstimate ?? r.price,
           price: r.price,
           currency: r.currency,
           stars: r.stars,
           source: r.source,
+          external: true,
           score: r.score,
           reasons: r.reasons,
         })),
+        disclaimer:
+          comparison?.disclaimer ||
+          'Prices are estimates. User books on the external hotel platform (Booking.com, Agoda, Hotels.com, Expedia, Kayak, etc.).',
         instruction:
-          'Lead with the recommendation (rank 1), then briefly compare 2–3 alternatives with markdown links to bookingUrl. Cite score reasons. Never invent URLs. Never book or pay.',
+          'Lead with rank 1. Name the provider (e.g. Booking.com). Link with markdown. Say price is an estimate and booking is external — ORBIT does not charge or complete bookings. Never invent URLs.',
       });
     },
     {
       name: 'search_hotels',
       description:
-        'Web-search hotels, score/compare against prefs, persist ranked offers. Returns recommendation + booking URLs.',
+        'Web-search hotels on international OTAs (Booking.com, Agoda, Hotels.com, Expedia, Kayak), score/compare, return ranked offers with provider + external booking URLs.',
       schema: z.object({
         destination: z.string().describe('City or area, e.g. Dubai Marina'),
         check_in: z.string().optional().describe('YYYY-MM-DD'),
@@ -225,6 +235,50 @@ export function createTravelAgentTools(deps: {
           .string()
           .optional()
           .describe('Attach scored offers to this trip if planning'),
+      }),
+    },
+  );
+
+  const searchTravelDeals = tool(
+    async (input) => {
+      const result = await travelSearchService.searchTravelDeals({
+        query: input.query,
+        destination: input.destination,
+        scope: input.scope,
+      });
+      actions.push({
+        type: 'TRAVEL_DEALS_SEARCH',
+        data: {
+          query: input.query,
+          ok: result.ok,
+          dealCount: result.deals.length,
+        },
+      });
+      return JSON.stringify({
+        ok: result.ok,
+        summary: result.summary,
+        error: result.error,
+        deals: result.deals,
+        disclaimer: result.disclaimer,
+        instruction:
+          'Be straightforward. Only report deals returned by this tool. If deals is empty, say no verified deals were found — do not invent codes, savings, or links. For each deal: provider + code only if non-null + sourceUrl markdown link + terms if present. Tell user to verify on the partner site. ORBIT does not apply coupons or book.',
+      });
+    },
+    {
+      name: 'search_travel_deals',
+      description:
+        'Web-search real travel coupons/promos only. Returns only verified search results. Never invent codes or URLs. Empty list if none found.',
+      schema: z.object({
+        query: z
+          .string()
+          .describe(
+            'What to search, e.g. "Dubai hotel promo codes October" or "Emirates flight sale"',
+          ),
+        destination: z.string().optional(),
+        scope: z
+          .enum(['hotel', 'flight', 'package', 'any'])
+          .optional()
+          .describe('Narrow to hotels, flights, packages, or any'),
       }),
     },
   );
@@ -411,14 +465,246 @@ export function createTravelAgentTools(deps: {
 
   const getTrip = tool(
     async (input) => {
-      const trip = await travelTripService.get(userId, input.trip_id);
-      return JSON.stringify({ ok: true, trip });
+      const dashboard = await travelTripService.getDashboard(
+        userId,
+        input.trip_id,
+      );
+      return JSON.stringify({
+        ok: true,
+        ...dashboard,
+        instruction:
+          'Present as a trip dashboard: dates, selected offers with external links, itinerary if any, budget vs spent. Do not invent bookings.',
+      });
     },
     {
       name: 'get_trip',
-      description: 'Fetch one trip with ranked hotel/flight offers.',
+      description:
+        'Trip dashboard: details, hotel/flight offers, saved itinerary, expenses vs budget.',
       schema: z.object({
         trip_id: z.string(),
+      }),
+    },
+  );
+
+  const recommendDestinations = tool(
+    async (input) => {
+      const result = await travelPlannerService.recommendDestinations({
+        interests: input.interests,
+        budget: input.budget,
+        currency: input.currency,
+        travelPurpose: input.purpose,
+        dates: input.dates,
+        weatherPref: input.weather,
+        origin: input.origin,
+      });
+      actions.push({
+        type: 'TRAVEL_DESTINATIONS',
+        data: { ok: result.ok, count: result.data.destinations.length },
+      });
+      return JSON.stringify({
+        ...result,
+        instruction:
+          'List destinations with why/bestFor. Only use returned items. Link sourceUrl when present. Estimates only.',
+      });
+    },
+    {
+      name: 'recommend_destinations',
+      description:
+        'Suggest destinations by interests, budget, purpose (family/adventure/etc), dates, weather. Web search; no invented places.',
+      schema: z.object({
+        interests: z.string().optional(),
+        purpose: z
+          .string()
+          .optional()
+          .describe('family | adventure | relaxation | culture | shopping | business'),
+        budget: z.number().optional(),
+        currency: z.string().optional(),
+        dates: z.string().optional(),
+        weather: z.string().optional(),
+        origin: z.string().optional(),
+      }),
+    },
+  );
+
+  const estimateTravelBudget = tool(
+    async (input) => {
+      const result = await travelPlannerService.estimateTravelBudget({
+        destination: input.destination,
+        nights: input.nights,
+        adults: input.adults,
+        totalBudget: input.total_budget,
+        currency: input.currency,
+        style: input.style,
+      });
+      actions.push({
+        type: 'TRAVEL_BUDGET_ESTIMATE',
+        data: { destination: input.destination, ok: result.ok },
+      });
+      return JSON.stringify({
+        ...result,
+        instruction:
+          'Show breakdown as ESTIMATES only. Cite sources if present. Never claim confirmed booking prices.',
+      });
+    },
+    {
+      name: 'estimate_travel_budget',
+      description:
+        'Estimate trip cost breakdown (flights, hotel, transport, food, activities). Estimates only.',
+      schema: z.object({
+        destination: z.string(),
+        nights: z.number().int().min(1).max(30).optional(),
+        adults: z.number().int().min(1).max(9).optional(),
+        total_budget: z.number().optional(),
+        currency: z.string().optional(),
+        style: z.string().optional(),
+      }),
+    },
+  );
+
+  const searchLocalTransport = tool(
+    async (input) => {
+      const result = await travelPlannerService.searchLocalTransport({
+        destination: input.destination,
+        need: input.need,
+        from: input.from,
+        to: input.to,
+      });
+      actions.push({
+        type: 'TRAVEL_LOCAL_TRANSPORT',
+        data: { destination: input.destination, ok: result.ok },
+      });
+      return JSON.stringify({
+        ...result,
+        instruction:
+          'List transport options with mode, estimate, and external links when present. No invented URLs.',
+      });
+    },
+    {
+      name: 'search_local_transport',
+      description:
+        'Airport transfers, taxi, metro, bus, car rental options for a destination with links when found.',
+      schema: z.object({
+        destination: z.string(),
+        need: z.string().optional(),
+        from: z.string().optional(),
+        to: z.string().optional(),
+      }),
+    },
+  );
+
+  const destinationGuide = tool(
+    async (input) => {
+      const result = await travelPlannerService.destinationGuide({
+        destination: input.destination,
+        interests: input.interests,
+        days: input.days,
+      });
+      actions.push({
+        type: 'TRAVEL_GUIDE',
+        data: { destination: input.destination, ok: result.ok },
+      });
+      return JSON.stringify({
+        ...result,
+        instruction:
+          'Present places + tips from tool only. Link sources when available. Fees are estimates.',
+      });
+    },
+    {
+      name: 'destination_guide',
+      description:
+        'Tourist guide: attractions, food, shopping, tips for a destination (web-backed).',
+      schema: z.object({
+        destination: z.string(),
+        interests: z.string().optional(),
+        days: z.number().int().min(1).max(14).optional(),
+      }),
+    },
+  );
+
+  const generateItineraryOptions = tool(
+    async (input) => {
+      const result = await travelPlannerService.generateItineraryOptions({
+        destination: input.destination,
+        days: input.days,
+        budget: input.budget,
+        currency: input.currency,
+        interests: input.interests,
+      });
+      actions.push({
+        type: 'TRAVEL_ITINERARIES',
+        data: { destination: input.destination, ok: result.ok },
+      });
+      return JSON.stringify({
+        ...result,
+        instruction:
+          'Compare plan styles (budget/balanced/premium/…). Only use returned plans. Offer to save one with save_trip_itinerary.',
+      });
+    },
+    {
+      name: 'generate_itinerary_options',
+      description:
+        'Generate multiple day-by-day itinerary styles for a destination (budget/balanced/premium/family/…).',
+      schema: z.object({
+        destination: z.string(),
+        days: z.number().int().min(1).max(14).optional(),
+        budget: z.number().optional(),
+        currency: z.string().optional(),
+        interests: z.string().optional(),
+      }),
+    },
+  );
+
+  const saveTripItinerary = tool(
+    async (input) => {
+      const dashboard = await travelTripService.saveItinerary(
+        userId,
+        input.trip_id,
+        input.itinerary,
+      );
+      actions.push({
+        type: 'TRIP_ITINERARY_SAVED',
+        data: { tripId: input.trip_id },
+      });
+      return JSON.stringify({ ok: true, ...dashboard });
+    },
+    {
+      name: 'save_trip_itinerary',
+      description: 'Save a chosen itinerary plan JSON onto an existing trip.',
+      schema: z.object({
+        trip_id: z.string(),
+        itinerary: z.any().describe('One plan object from generate_itinerary_options'),
+      }),
+    },
+  );
+
+  const logTripExpense = tool(
+    async (input) => {
+      const dashboard = await travelTripService.addExpense(userId, input.trip_id, {
+        category: input.category,
+        amount: input.amount,
+        currency: input.currency,
+        note: input.note,
+      });
+      actions.push({
+        type: 'TRIP_EXPENSE_LOGGED',
+        data: { tripId: input.trip_id, amount: input.amount },
+      });
+      return JSON.stringify({
+        ok: true,
+        ...dashboard,
+        instruction: 'Confirm expense logged and show remaining budget if set.',
+      });
+    },
+    {
+      name: 'log_trip_expense',
+      description:
+        'Log an actual/planned expense against a trip budget (food, taxi, tickets, etc.).',
+      schema: z.object({
+        trip_id: z.string(),
+        category: z.string(),
+        amount: z.number().positive(),
+        currency: z.string().optional(),
+        note: z.string().optional(),
       }),
     },
   );
@@ -447,14 +733,17 @@ export function createTravelAgentTools(deps: {
       return JSON.stringify({
         ok: true,
         ...result,
+        external: true,
+        disclaimer:
+          'Estimated details only. Complete booking on the partner website — ORBIT does not process payment.',
         instruction:
-          'Share the bookingUrl as a markdown link. User completes booking externally — do not collect payment.',
+          'Share the bookingUrl as a markdown link. Name the platform if known. User completes booking externally — do not collect payment.',
       });
     },
     {
       name: 'select_trip_offer',
       description:
-        'Mark a hotel or flight offer as selected on a trip and return its booking URL.',
+        'Mark a hotel or flight offer as selected on a trip and return its external booking URL.',
       schema: z.object({
         trip_id: z.string(),
         offer_id: z.string(),
@@ -639,12 +928,20 @@ export function createTravelAgentTools(deps: {
   return [
     getTravelPreferences,
     saveTravelPreferences,
+    recommendDestinations,
+    estimateTravelBudget,
     searchHotels,
     searchFlights,
+    searchTravelDeals,
+    searchLocalTransport,
+    destinationGuide,
+    generateItineraryOptions,
     createTrip,
     listTrips,
     getTrip,
     selectTripOffer,
+    saveTripItinerary,
+    logTripExpense,
     planTrip,
     createTravelReminder,
   ];

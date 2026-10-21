@@ -122,6 +122,10 @@ async function bootstrap() {
       'Support',
       'Contact support — email + subject + description → admin inbox',
     )
+    .addTag(
+      'Health Check',
+      'Main-page wellness quiz — questions, submit, latest result (not a diagnosis)',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -22,6 +23,11 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { SocialAuthDto, SocialProvider } from './dto/social-auth.dto';
 import { ResendOtpDto, VerifyOtpDto } from './dto/otp.dto';
+import {
+  ForgotPasswordDto,
+  ResendResetOtpDto,
+  ResetPasswordDto,
+} from './dto/forgot-password.dto';
 import { SocialTokenService } from './services/social-token.service';
 import { BrevoMailService } from './services/brevo-mail.service';
 
@@ -42,6 +48,8 @@ type RegisterPayload = {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
@@ -258,6 +266,186 @@ export class AuthService {
 
     await this.saveFcm(user.id, dto.fcmToken, dto.platform);
     return this.buildAuthResponse(user, false);
+  }
+
+  /**
+   * Step 1 — forgot password: email OTP if a verified account exists.
+   * Works for email/password users and social users (lets them set a password).
+   * Always returns the same shape (does not reveal whether email exists).
+   */
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const email = dto.email.toLowerCase().trim();
+    const expiresMinutes = Number(
+      this.config.get('OTP_EXPIRES_MINUTES') || 10,
+    );
+    const generic = {
+      email,
+      otpSent: true,
+      expiresInSeconds: expiresMinutes * 60,
+      message:
+        'If an account exists for this email, a reset code has been sent',
+    };
+
+    const user = await this.usersService.findByEmail(email);
+    if (!user || !user.isActive || !user.emailVerifiedAt) {
+      this.logger.log(
+        `forgot-password skipped email=${email} reason=${!user ? 'not_found' : !user.isActive ? 'inactive' : 'unverified'}`,
+      );
+      return generic;
+    }
+
+    const code = this.generateOtp();
+    const expiresAt = new Date(Date.now() + expiresMinutes * 60_000);
+
+    await this.prisma.emailOtp.upsert({
+      where: {
+        email_purpose: { email, purpose: EmailOtpPurpose.PASSWORD_RESET },
+      },
+      create: {
+        email,
+        purpose: EmailOtpPurpose.PASSWORD_RESET,
+        codeHash: this.hashOtp(code),
+        payload: { userId: user.id } as Prisma.InputJsonValue,
+        expiresAt,
+        attempts: 0,
+      },
+      update: {
+        codeHash: this.hashOtp(code),
+        payload: { userId: user.id } as Prisma.InputJsonValue,
+        expiresAt,
+        attempts: 0,
+      },
+    });
+
+    await this.brevoMail.sendOtpEmail({
+      to: email,
+      code,
+      fullName: user.fullName,
+      purpose: 'password_reset',
+    });
+
+    this.logger.log(
+      `forgot-password OTP emailed to=${email} hasPassword=${Boolean(user.passwordHash)}`,
+    );
+    return generic;
+  }
+
+  async resendResetOtp(dto: ResendResetOtpDto) {
+    const email = dto.email.toLowerCase().trim();
+    const expiresMinutes = Number(
+      this.config.get('OTP_EXPIRES_MINUTES') || 10,
+    );
+    const generic = {
+      email,
+      otpSent: true,
+      expiresInSeconds: expiresMinutes * 60,
+      message:
+        'If an account exists for this email, a reset code has been sent',
+    };
+
+    const user = await this.usersService.findByEmail(email);
+    if (!user || !user.isActive || !user.emailVerifiedAt) {
+      return generic;
+    }
+
+    const existing = await this.prisma.emailOtp.findUnique({
+      where: {
+        email_purpose: { email, purpose: EmailOtpPurpose.PASSWORD_RESET },
+      },
+    });
+
+    const code = this.generateOtp();
+    const expiresAt = new Date(Date.now() + expiresMinutes * 60_000);
+
+    if (existing) {
+      await this.prisma.emailOtp.update({
+        where: { id: existing.id },
+        data: {
+          codeHash: this.hashOtp(code),
+          expiresAt,
+          attempts: 0,
+          payload: { userId: user.id } as Prisma.InputJsonValue,
+        },
+      });
+    } else {
+      await this.prisma.emailOtp.create({
+        data: {
+          email,
+          purpose: EmailOtpPurpose.PASSWORD_RESET,
+          codeHash: this.hashOtp(code),
+          payload: { userId: user.id } as Prisma.InputJsonValue,
+          expiresAt,
+          attempts: 0,
+        },
+      });
+    }
+
+    await this.brevoMail.sendOtpEmail({
+      to: email,
+      code,
+      fullName: user.fullName,
+      purpose: 'password_reset',
+    });
+
+    this.logger.log(`resend-reset-otp emailed to=${email}`);
+    return generic;
+  }
+
+  /**
+   * Step 2 — verify OTP + set new password → JWT (logged in).
+   * Also allows social-only accounts to set a first password.
+   */
+  async resetPassword(dto: ResetPasswordDto) {
+    const email = dto.email.toLowerCase().trim();
+    const row = await this.prisma.emailOtp.findUnique({
+      where: {
+        email_purpose: { email, purpose: EmailOtpPurpose.PASSWORD_RESET },
+      },
+    });
+
+    if (!row) {
+      throw new BadRequestException(
+        'No password reset in progress. Please request a new code.',
+      );
+    }
+
+    if (row.expiresAt.getTime() < Date.now()) {
+      await this.prisma.emailOtp.delete({ where: { id: row.id } });
+      throw new BadRequestException('OTP expired. Please request a new code.');
+    }
+
+    if (row.attempts >= 5) {
+      await this.prisma.emailOtp.delete({ where: { id: row.id } });
+      throw new BadRequestException(
+        'Too many invalid attempts. Please request a new code.',
+      );
+    }
+
+    const ok = row.codeHash === this.hashOtp(dto.otp.trim());
+    if (!ok) {
+      await this.prisma.emailOtp.update({
+        where: { id: row.id },
+        data: { attempts: { increment: 1 } },
+      });
+      throw new UnauthorizedException('Invalid verification code');
+    }
+
+    const user = await this.usersService.findByEmail(email);
+    if (!user || !user.isActive || !user.emailVerifiedAt) {
+      await this.prisma.emailOtp.delete({ where: { id: row.id } });
+      throw new BadRequestException(
+        'Account not found or inactive. Please register again.',
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, 12);
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    await this.prisma.emailOtp.delete({ where: { id: row.id } });
+    return this.buildAuthResponse(updated, false);
   }
 
   async socialLogin(dto: SocialAuthDto) {

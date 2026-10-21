@@ -12,16 +12,16 @@
 |------:|------|-----------|--------|
 | **1** | **Contact Support / Customer Support** | 7 | `DONE` (v1 email form) |
 | **2** | **Profile** (extend settings/preferences) | 7 + existing Profile API | `DONE` (preferences map) |
-| **3** | Multilingual support | 1 | `PENDING` |
-| **4** | International hotel booking platforms | 2 | `PENDING` |
-| **5** | Discount coupons & travel offers | 3 | `PENDING` |
-| **6** | Halal / Haram stock classification | 4 | `PENDING` |
-| **7** | Investment insights (Bitcoin, gold, lithium) | 5 | `PENDING` |
-| **8** | Health check (main page APIs) | 6 | `PENDING` |
-| **9** | Settings (preferences API) | 7 | `PENDING` |
-| **10** | Copyright / IP notices API | 8 | `PENDING` |
-| **11** | Master prompt (global / multilingual) | 9 | `PENDING` |
-| **12** | Comprehensive travel planning system (A–J) | 10 | `PENDING` |
+| **3** | Multilingual support | 1 | `SKIPPED` (for now) |
+| **4** | International hotel booking platforms | 2 | `DONE` |
+| **5** | Discount coupons & travel offers | 3 | `DONE` (web search A only) |
+| **6** | Halal / Haram stock classification | 4 | `DONE` (web search A) |
+| **7** | Investment insights (Bitcoin, gold, lithium) | 5 | `DONE` |
+| **8** | Health check (main page APIs) | 6 | `DONE` |
+| **9** | Settings (preferences API) | 7 | `SKIPPED` (for now) |
+| **10** | Copyright / IP notices API | 8 | `SKIPPED` (for now) |
+| **11** | Master prompt (global / multilingual) | 9 | `DONE` (shared policy) |
+| **12** | Comprehensive travel planning system (A–J) | 10 | `DONE` |
 
 Status values: `NEXT` | `IN_PROGRESS` | `DONE` | `PENDING` | `BLOCKED`
 
@@ -119,30 +119,31 @@ Comprehensive, globally accessible, user-friendly, financially practical: travel
 - [ ] Agents must reply in user language
 
 ### Order 4 — Hotel platforms (#2)
-- [ ] Harden Travel hotel search toward major OTAs (Booking, Agoda, Hotels.com, Expedia, …)
-- [ ] Normalize offer: `provider`, `url`, `priceEstimate`, `currency`, `external: true`
-- [ ] Prompt: never claim in-app booking
+- [x] Harden Travel hotel search toward major OTAs (Booking, Agoda, Hotels.com, Expedia, Kayak)
+- [x] Normalize offer: `provider`, `url`, `priceEstimate`, `currency`, `external: true`
+- [x] Prompt + tool disclaimer: never claim in-app booking; estimate vs external redirect
 
 ### Order 5 — Coupons & offers (#3)
-- [ ] Coupon/deal model + chat tool `search_travel_deals`
-- [ ] Fields: code, terms, expiry, source URL, estimate vs confirmed
-- [ ] Seed/admin path for partner deals later
+- [x] Chat tool `search_travel_deals` (web search only — Layer A)
+- [x] Fields: title, code, scope, terms, validUntil, sourceUrl, provider, estimatedSaving, external
+- [x] Never invent codes; disclaimer to verify on partner site
+- [ ] Later (Layer B): curated `TravelDeal` DB + partner seeds when available
 
 ### Order 6 — Halal / Haram (#4)
-- [ ] Finance tool `screen_sharia_stock(symbol)` (chat-only)
-- [ ] Response: `HALAL | HARAM | MIXED | UNKNOWN` + criteria + sources
-- [ ] Disclaimers: not a fatwa; cite methodology
-- [ ] Optional screening history
+- [x] Finance tool `screen_sharia_stock(symbol)` (chat-only web search)
+- [x] Response: `HALAL | HARAM | MIXED | UNKNOWN` + criteria + sources
+- [x] No hallucination: unclear/no sources → UNKNOWN; not a fatwa disclaimer
+- [ ] Later (optional): dedicated Sharia vendor API + screening history
 
 ### Order 7 — BTC / gold / lithium (#5)
-- [ ] Finance tool `analyze_asset({ asset })`
-- [ ] Trends, risk, uncertainty, sources; **no return guarantees**
-- [ ] Chat-only (no cron loops)
+- [x] Finance tool `analyze_asset({ asset })`
+- [x] Trends, risk, uncertainty, sources; **no return guarantees**
+- [x] Chat-only (no cron loops)
 
 ### Order 8 — Health check (#6)
-- [ ] Define assessment contract (questions / score / tips)
-- [ ] Models + `POST/GET` health-check APIs
-- [ ] Health agent can interpret results in chat
+- [x] Fixed wellness quiz v1 (questions / score / tips) — not a diagnosis
+- [x] Model `HealthCheckResult` + APIs: questions, submit, latest, history
+- [ ] Optional later: Health agent can interpret latest result in chat
 - [ ] Main-page UI = frontend
 
 ### Order 9 — Settings (#7 remainder)
@@ -155,21 +156,22 @@ Comprehensive, globally accessible, user-friendly, financially practical: travel
 - [ ] Footer/UI = frontend
 
 ### Order 11 — Master prompt (#9)
-- [ ] Shared ORBIT master policy module (safety, language, disclaimers, no fake prices/bookings)
-- [ ] Rewrite Main + domain prompts for global / cultural / multilingual use
-- [ ] Router aware of new capabilities
+- [x] Shared `orbit-master-policy.ts` (honesty, no inventing, disclaimers)
+- [x] Wired into all domain agents via `withAttachmentSystemPrompt` + Health agent
+- [x] Main router: classify only, no invented answers
+- [ ] Later optional: multilingual reply policy when languages are enabled
 
 ### Order 12 — Full travel system (#10 A–J)
-- [ ] **A** Destination recommend tool + prefs
-- [ ] **B** Trip budget breakdown model + estimate tool
-- [ ] **C** Flight search/compare + external links + deals
-- [ ] **D** Hotel compare (ties to #2/#3)
-- [ ] **E** Local transport tool + links/estimates
-- [ ] **F** Tourist guide + day itineraries
-- [ ] **G** Multi-plan generator (budget/balanced/premium/…)
-- [ ] **H** Expand Trip dashboard (refs, schedule, spend vs budget, reminders)
-- [ ] **I** Savings/deals (ties to #3)
-- [ ] **J** Travel assistant upgrades (multilingual, replan, cost-cut)
+- [x] **A** `recommend_destinations`
+- [x] **B** `estimate_travel_budget`
+- [x] **C** `search_flights` (existing, kept)
+- [x] **D** `search_hotels` + OTAs (existing, kept)
+- [x] **E** `search_local_transport`
+- [x] **F** `destination_guide`
+- [x] **G** `generate_itinerary_options` + `save_trip_itinerary`
+- [x] **H** Trip dashboard `get_trip` + `log_trip_expense` (+ purpose/itinerary/expenseLog on Trip)
+- [x] **I** `search_travel_deals` (existing, kept)
+- [x] **J** Travel agent prompt covers full planner flow + reminders/prefs
 
 ---
 
@@ -205,6 +207,17 @@ Comprehensive, globally accessible, user-friendly, financially practical: travel
 | 2026-10-16 | Document created. Work order: Support → Profile → rest. |
 | 2026-10-16 | Contact Support v1: `POST /api/support/contact` → Brevo → admin. Next: Profile. |
 | 2026-10-16 | Profile preferences map API (multi values per category). Next backlog item: Multilingual. |
+| 2026-10-19 | Pushed to GitHub main. Multilingual skipped for now. Next: International hotel booking platforms. |
+| 2026-10-19 | Hotel OTAs hardened (provider/url/priceEstimate/external). Next: Discount coupons & travel offers. |
+| 2026-10-19 | Travel deals Layer A: `search_travel_deals` chat web search. Next: Halal/Haram stocks. |
+| 2026-10-19 | Sharia screen Layer A: `screen_sharia_stock`. Next: BTC/gold/lithium insights. |
+| 2026-10-19 | BTC/gold/lithium skipped for later. Next: Health check (main page APIs). |
+| 2026-10-19 | Health check APIs shipped. Next: Settings. |
+| 2026-10-19 | Settings skipped for now. Next: Copyright / IP notices API. |
+| 2026-10-19 | Copyright skipped for now. Next: Master prompt. |
+| 2026-10-19 | Light master policy shipped; full travel A–J skipped (current travel OK). Meeting backlog largely complete. |
+| 2026-10-19 | Full travel A–J planner tools + trip dashboard/expenses shipped. |
+| 2026-10-19 | Asset insights `analyze_asset` (BTC/gold/lithium). |
 
 ---
 

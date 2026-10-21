@@ -17,6 +17,7 @@ import { ProductivityModule } from './productivity/productivity.module';
 import { BusinessModule } from './business/business.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SupportModule } from './support/support.module';
+import { HealthCheckModule } from './health-check/health-check.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { SupportModule } from './support/support.module';
     RemindersModule,
     SymptomsModule,
     HealthDocumentsModule,
+    HealthCheckModule,
     DevicesModule,
     TravelModule,
     FinanceModule,

@@ -18,6 +18,7 @@ import {
 } from '../agent.types';
 import { buildAttachmentContext } from '../attachment-context';
 import { buildHealthSystemPrompt } from './health-agent.prompt';
+import { withOrbitMasterPolicy } from '../orbit-master-policy';
 import {
   createHealthAgentTools,
   HealthAgentAction,
@@ -96,18 +97,20 @@ export class HealthAgentService {
     }));
 
     const systemPrompt =
-      buildHealthSystemPrompt({
-        fullName: user?.fullName || 'User',
-        timezone,
-        medicalContext: medical,
-        reminders,
-        recentSymptoms: recentSymptoms.slice(0, 5),
-      }) +
-      `\n\nStored health documents (metadata): ${JSON.stringify(docsSummary)}` +
-      (attachmentContext
-        ? `\n\nAttachments on the latest user message:\n${attachmentContext}`
-        : '') +
-      '\n\nIf the user attached a document/image, READ the extracted text (and image if provided) and answer accordingly. Summarize clearly; do not invent labs or diagnoses. You may call search_health_documents or get_health_document for stored docs.';
+      withOrbitMasterPolicy(
+        buildHealthSystemPrompt({
+          fullName: user?.fullName || 'User',
+          timezone,
+          medicalContext: medical,
+          reminders,
+          recentSymptoms: recentSymptoms.slice(0, 5),
+        }) +
+          `\n\nStored health documents (metadata): ${JSON.stringify(docsSummary)}` +
+          (attachmentContext
+            ? `\n\nAttachments on the latest user message:\n${attachmentContext}`
+            : '') +
+          '\n\nIf the user attached a document/image, READ the extracted text (and image if provided) and answer accordingly. Summarize clearly; do not invent labs or diagnoses. You may call search_health_documents or get_health_document for stored docs.',
+      );
 
     const historyMessages = params.history.slice(-12).map((m) => {
       if (m.role === 'ASSISTANT') return new AIMessage(m.content);

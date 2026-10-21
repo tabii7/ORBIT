@@ -94,7 +94,7 @@ export class UpdateProfileDto {
   hobby?: string;
 }
 
-/** Category → multiple values */
+/** Fixed categories → multiple values (always includes travel/food/language/finance) */
 export type ProfilePreferences = Record<string, string[]>;
 
 /** Flat profile payload returned by GET/PUT /api/profile */
@@ -110,6 +110,6 @@ export type ProfileContract = {
   residence: string | null;
   hobby: string | null;
   avatarUrl: string | null;
-  /** e.g. { travel: ["beach","family"], food: ["halal"] } */
+  /** Always: { travel, food, language, finance } → string[] */
   preferences: ProfilePreferences;
 };

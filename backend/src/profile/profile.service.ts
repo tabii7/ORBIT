@@ -21,6 +21,12 @@ import {
   UpdatePreferenceCategoryDto,
   UpdatePreferencesDto,
 } from './dto/preferences.dto';
+import {
+  emptyPreferences,
+  PREFERENCE_CATEGORIES,
+  PREFERENCE_CATEGORY_SET,
+  PreferenceCategory,
+} from './preferences.constants';
 import { Prisma } from '@prisma/client';
 
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
@@ -140,10 +146,13 @@ export class ProfileService {
     return { preferences: this.normalizePreferences(profile?.preferences) };
   }
 
-  /** Replace entire preferences map */
+  /** Replace entire preferences map (predefined categories only) */
   async updatePreferences(userId: string, dto: UpdatePreferencesDto) {
     await this.ensureActiveUser(userId);
-    const preferences = this.normalizePreferences(dto.preferences);
+    this.assertOnlyKnownPreferenceKeys(dto.preferences);
+    const preferences = this.normalizePreferences(dto.preferences, {
+      fullReplace: true,
+    });
     await this.prisma.userProfile.upsert({
       where: { userId },
       create: {
@@ -155,22 +164,20 @@ export class ProfileService {
     return this.getPreferences(userId);
   }
 
-  /** Replace values for one category */
+  /** Replace values for one predefined category (empty = clear selections) */
   async setPreferenceCategory(
     userId: string,
     category: string,
     dto: UpdatePreferenceCategoryDto,
   ) {
     await this.ensureActiveUser(userId);
-    const key = this.normalizeCategory(category);
+    const key = this.requireCategory(category);
     const values = this.normalizeValues(dto.values);
     const current = await this.getPreferences(userId);
-    const next: ProfilePreferences = { ...current.preferences };
-    if (values.length === 0) {
-      delete next[key];
-    } else {
-      next[key] = values;
-    }
+    const next: ProfilePreferences = {
+      ...current.preferences,
+      [key]: values,
+    };
     await this.prisma.userProfile.upsert({
       where: { userId },
       create: {
@@ -182,14 +189,14 @@ export class ProfileService {
     return this.getPreferences(userId);
   }
 
-  /** Merge values into one category */
+  /** Merge values into one predefined category */
   async addPreferenceValues(
     userId: string,
     category: string,
     dto: AddPreferenceValuesDto,
   ) {
     await this.ensureActiveUser(userId);
-    const key = this.normalizeCategory(category);
+    const key = this.requireCategory(category);
     const toAdd = this.normalizeValues(dto.values);
     const current = await this.getPreferences(userId);
     const existing = current.preferences[key] ?? [];
@@ -198,29 +205,6 @@ export class ProfileService {
       ...current.preferences,
       [key]: merged,
     };
-    if (merged.length === 0) {
-      delete next[key];
-    }
-    await this.prisma.userProfile.upsert({
-      where: { userId },
-      create: {
-        userId,
-        preferences: next as Prisma.InputJsonValue,
-      },
-      update: { preferences: next as Prisma.InputJsonValue },
-    });
-    return this.getPreferences(userId);
-  }
-
-  async deletePreferenceCategory(userId: string, category: string) {
-    await this.ensureActiveUser(userId);
-    const key = this.normalizeCategory(category);
-    const current = await this.getPreferences(userId);
-    if (!(key in current.preferences)) {
-      return current;
-    }
-    const next = { ...current.preferences };
-    delete next[key];
     await this.prisma.userProfile.upsert({
       where: { userId },
       create: {
@@ -344,24 +328,33 @@ export class ProfileService {
     };
   }
 
-  private normalizeCategory(category: string): string {
+  private requireCategory(category: string): PreferenceCategory {
     const key = category.trim().toLowerCase().replace(/\s+/g, '_');
-    if (!key || key.length > 40) {
-      throw new BadRequestException({
-        message: 'Validation failed',
-        errors: { category: 'Category must be 1–40 characters' },
-      });
-    }
-    if (!/^[a-z0-9_]+$/.test(key)) {
+    if (!PREFERENCE_CATEGORY_SET.has(key)) {
       throw new BadRequestException({
         message: 'Validation failed',
         errors: {
-          category:
-            'Category must be letters, numbers, underscore (e.g. travel, food)',
+          category: `Category must be one of: ${PREFERENCE_CATEGORIES.join(', ')}`,
         },
       });
     }
-    return key;
+    return key as PreferenceCategory;
+  }
+
+  /** Reject unknown keys on full replace (do not silently drop). */
+  private assertOnlyKnownPreferenceKeys(raw: unknown) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+    const unknown = Object.keys(raw as Record<string, unknown>).filter(
+      (k) => !PREFERENCE_CATEGORY_SET.has(k.trim().toLowerCase().replace(/\s+/g, '_')),
+    );
+    if (unknown.length) {
+      throw new BadRequestException({
+        message: 'Validation failed',
+        errors: {
+          preferences: `Unknown categories: ${unknown.join(', ')}. Allowed: ${PREFERENCE_CATEGORIES.join(', ')}`,
+        },
+      });
+    }
   }
 
   private normalizeValues(values: unknown): string[] {
@@ -381,19 +374,20 @@ export class ProfileService {
     return out;
   }
 
-  private normalizePreferences(raw: unknown): ProfilePreferences {
+  /** Always returns all predefined categories (unknown stored keys ignored). */
+  private normalizePreferences(
+    raw: unknown,
+    _opts?: { fullReplace?: boolean },
+  ): ProfilePreferences {
+    const out = emptyPreferences();
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      return {};
+      return out;
     }
-    const out: ProfilePreferences = {};
-    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-      try {
-        const key = this.normalizeCategory(k);
-        const values = this.normalizeValues(v);
-        if (values.length) out[key] = values;
-      } catch {
-        // skip invalid keys from stored JSON
-      }
+    const map = raw as Record<string, unknown>;
+    for (const [k, v] of Object.entries(map)) {
+      const key = k.trim().toLowerCase().replace(/\s+/g, '_');
+      if (!PREFERENCE_CATEGORY_SET.has(key)) continue;
+      out[key as PreferenceCategory] = this.normalizeValues(v);
     }
     return out;
   }

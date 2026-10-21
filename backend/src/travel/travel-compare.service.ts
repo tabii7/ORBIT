@@ -3,15 +3,24 @@ import { TravelOfferKind } from '@prisma/client';
 import { TravelPreferencesService } from './travel-preferences.service';
 import { TravelSearchHit } from './travel-search.service';
 import { TravelTripService } from './travel-trip.service';
+import { resolveHotelProvider } from './travel-ota';
 
 export type NormalizedTravelOption = {
   kind: TravelOfferKind;
   title: string;
   bookingUrl: string;
+  /** Alias of bookingUrl for clients */
+  url: string;
   snippet?: string;
   source?: string;
+  /** Friendly platform name e.g. Booking.com */
+  provider: string;
   price?: number;
+  /** Explicit estimate label for clients */
+  priceEstimate?: number;
   currency?: string;
+  /** Always true — user books on partner site */
+  external: true;
   stars?: number;
   airline?: string;
   durationMinutes?: number;
@@ -50,18 +59,29 @@ export class TravelCompareService {
       hit.content || (hit as { snippet?: string }).snippet || '',
     );
 
+    const bookingUrl =
+      hit.url || (hit as { bookingUrl?: string }).bookingUrl || '';
+    const hotelInfo = resolveHotelProvider(bookingUrl);
+    const priceNum = Number.isFinite(price as number)
+      ? (price as number)
+      : undefined;
+
     return {
       title: hit.title,
-      bookingUrl: hit.url || (hit as { bookingUrl?: string }).bookingUrl || '',
+      bookingUrl,
+      url: bookingUrl,
       snippet: text,
-      source: this.extractSource(
-        hit.url || (hit as { bookingUrl?: string }).bookingUrl || '',
-      ),
-      price: Number.isFinite(price as number) ? (price as number) : undefined,
+      source:
+        this.extractSource(bookingUrl) || hotelInfo.domain || undefined,
+      provider:
+        (hit as { provider?: string }).provider || hotelInfo.provider,
+      price: priceNum,
+      priceEstimate: priceNum,
       currency:
         (hit as { currency?: string }).currency ||
         this.extractCurrency(text) ||
         undefined,
+      external: true as const,
       stars:
         typeof hit.stars === 'number'
           ? hit.stars
@@ -115,6 +135,15 @@ export class TravelCompareService {
     if (option.source) {
       score += 5;
       reasons.push(`Source: ${option.source}`);
+    }
+
+    const ota = resolveHotelProvider(option.bookingUrl || '');
+    if (ota.isMajorOta) {
+      score += 12;
+      reasons.push(`Major OTA: ${ota.provider}`);
+    } else if (ota.isKnownHotelSite) {
+      score += 4;
+      reasons.push(`Hotel site: ${ota.provider}`);
     }
 
     return { score: Math.max(0, Math.min(100, score)), reasons };
@@ -239,11 +268,20 @@ export class TravelCompareService {
         ? {
             title: options[0].title,
             bookingUrl: options[0].bookingUrl,
+            url: options[0].url,
+            provider: options[0].provider,
+            priceEstimate: options[0].priceEstimate,
+            currency: options[0].currency,
+            external: true as const,
             score: options[0].score,
             why: options[0].reasons,
             offerId: saved[0]?.id,
+            disclaimer:
+              'Estimated price only. Booking is completed on the external partner site.',
           }
         : null,
+      disclaimer:
+        'Prices are estimates. ORBIT does not book or charge — you are redirected to the hotel platform to complete booking.',
     };
   }
 

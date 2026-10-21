@@ -4,17 +4,16 @@ import {
   ArrayUnique,
   IsArray,
   IsObject,
-  IsOptional,
   IsString,
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { PREFERENCE_CATEGORIES } from '../preferences.constants';
 
-/** Full preferences map: category → list of values */
+/** Full preferences map: only predefined categories are accepted */
 export class UpdatePreferencesDto {
   @ApiProperty({
-    description:
-      'Map of category → multiple preference values. Replaces the full map.',
+    description: `Only keys ${PREFERENCE_CATEGORIES.join(', ')}. Extra keys are rejected. Omitted categories keep prior values when using per-category APIs; on full replace, omitted keys become [].`,
     example: {
       travel: ['beach', 'family', 'budget'],
       food: ['halal', 'vegetarian'],

@@ -1,13 +1,15 @@
 import type { ChatAttachmentInput } from './agent.types';
+import { withOrbitMasterPolicy } from './orbit-master-policy';
 
 export function withAttachmentSystemPrompt(
   basePrompt: string,
   attachments: ChatAttachmentInput[] | undefined,
 ): string {
+  const withPolicy = withOrbitMasterPolicy(basePrompt);
   const ctx = buildAttachmentContext(attachments);
-  if (!ctx) return basePrompt;
+  if (!ctx) return withPolicy;
   return (
-    basePrompt +
+    withPolicy +
     `\n\nAttachments on the latest user message:\n${ctx}` +
     '\n\nIf the user attached a document/image, READ the extracted text (and image if provided) and answer accordingly. Do not invent contents that are not in the attachment.'
   );

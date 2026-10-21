@@ -2,6 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { assertChatOpenAiAllowed } from '../ai/openai-chat-scope';
+import {
+  HOTEL_OTA_DOMAINS,
+  HOTEL_SECONDARY_DOMAINS,
+  hotelOtaSearchHint,
+  resolveHotelProvider,
+} from './travel-ota';
 
 export type TravelSearchHit = {
   title: string;
@@ -14,6 +20,10 @@ export type TravelSearchHit = {
   airline?: string;
   durationMinutes?: number;
   stops?: number;
+  /** Friendly OTA name when known (hotels) */
+  provider?: string;
+  /** Always true for ORBIT travel links — book on partner site */
+  external?: boolean;
 };
 
 type SearchOutcome = {
@@ -21,6 +31,27 @@ type SearchOutcome = {
   answer?: string;
   results: TravelSearchHit[];
   error?: string;
+};
+
+export type TravelDeal = {
+  title: string;
+  code: string | null;
+  scope: 'hotel' | 'flight' | 'package' | 'other';
+  terms: string | null;
+  validUntil: string | null;
+  sourceUrl: string;
+  provider: string;
+  estimatedSaving: string | null;
+  currency: string | null;
+  external: true;
+};
+
+export type TravelDealsOutcome = {
+  ok: boolean;
+  summary: string | null;
+  deals: TravelDeal[];
+  error?: string;
+  disclaimer: string;
 };
 
 @Injectable()
@@ -77,16 +108,29 @@ export class TravelSearchService {
       ? `Prefer results from: ${params.includeDomains.join(', ')}.`
       : '';
 
+    const hotelExtra =
+      params.kind === 'hotels'
+        ? [
+            hotelOtaSearchHint(),
+            'Cover multiple platforms when possible (Booking.com, Agoda, Hotels.com, Expedia, Kayak).',
+            'Mark that booking happens on the partner website (external redirect).',
+          ].join(' ')
+        : '';
+
     const system = [
       `You are ORBIT travel web search for ${params.kind}.`,
-      'Use web search to find real booking pages that match the user request.',
-      'Never invent URLs, hotels, airlines, or prices.',
+      'Use web search ONLY. Be literal — do not invent or guess.',
+      'Never invent URLs, hotels, airlines, prices, or providers.',
+      'If search finds nothing real, return {"summary":"No verified results","results":[]}.',
+      'Omit price/stars/airline fields when not clearly present in search (do not fabricate numbers).',
       'Prefer exact listing/search result pages on booking sites (not homepage-only).',
       preferredSites,
+      hotelExtra,
       `Return at most ${maxResults} options.`,
       'Respond with JSON only (no markdown fences):',
-      '{"summary":"short overview","results":[{"title":"...","url":"https://...","snippet":"why it fits","price":1234,"currency":"AED","stars":4,"airline":"Emirates","durationMinutes":420,"stops":0}]}',
-      'Include price/stars for hotels and price/airline/durationMinutes/stops for flights when known from search. Omit unknown fields.',
+      '{"summary":"short overview","results":[{"title":"...","url":"https://...","snippet":"why it fits","price":1234,"currency":"AED","stars":4,"airline":"Emirates","durationMinutes":420,"stops":0,"provider":"Booking.com"}]}',
+      'Include price/stars for hotels and price/airline/durationMinutes/stops for flights ONLY when known from search.',
+      'For hotels, set provider to the OTA name when known. Prices are estimates only.',
     ]
       .filter(Boolean)
       .join(' ');
@@ -122,10 +166,16 @@ export class TravelSearchService {
       const fromCitations = this.extractCitationHits(response, maxResults);
       const fromSources = this.extractSourceHits(response, maxResults);
 
-      const merged = this.mergeHits(
+      let merged = this.mergeHits(
         [...fromJson, ...fromCitations, ...fromSources],
-        maxResults,
+        maxResults * 2,
       );
+
+      if (params.kind === 'hotels') {
+        merged = this.enrichAndPreferHotelOtas(merged, maxResults);
+      } else {
+        merged = merged.slice(0, maxResults);
+      }
 
       if (!merged.length && !answer) {
         return {
@@ -169,20 +219,15 @@ export class TravelSearchService {
         : null,
       params.stars ? `${params.stars} star preferred` : null,
       params.adults ? `${params.adults} adults` : null,
-      'Return direct booking/listing page URLs',
+      'Return direct booking/listing page URLs on international OTAs',
+      hotelOtaSearchHint(),
     ].filter(Boolean);
 
     return this.search({
       query: parts.join('. '),
-      maxResults: 6,
+      maxResults: 8,
       kind: 'hotels',
-      includeDomains: [
-        'booking.com',
-        'hotels.com',
-        'expedia.com',
-        'agoda.com',
-        'tripadvisor.com',
-      ],
+      includeDomains: [...HOTEL_OTA_DOMAINS, ...HOTEL_SECONDARY_DOMAINS],
     });
   }
 
@@ -226,6 +271,244 @@ export class TravelSearchService {
     });
   }
 
+  /**
+   * Chat-only web search for discount coupons / travel promo offers.
+   * Never invents coupon codes — empty list if none found.
+   */
+  async searchTravelDeals(params: {
+    query: string;
+    destination?: string;
+    scope?: 'hotel' | 'flight' | 'package' | 'any';
+    maxResults?: number;
+  }): Promise<TravelDealsOutcome> {
+    const disclaimer =
+      'Deals and coupon codes change often. Verify on the partner site before booking. ORBIT does not apply codes or process payment — links are external.';
+
+    try {
+      assertChatOpenAiAllowed('travel-search:deals');
+    } catch (error) {
+      return {
+        ok: false,
+        summary: null,
+        deals: [],
+        error: error instanceof Error ? error.message : String(error),
+        disclaimer,
+      };
+    }
+
+    if (!this.apiKey) {
+      return {
+        ok: false,
+        summary: null,
+        deals: [],
+        error: 'OPENAI_API_KEY is not configured',
+        disclaimer,
+      };
+    }
+
+    const maxResults = params.maxResults ?? 6;
+    const scope = params.scope || 'any';
+    const client = new OpenAI({ apiKey: this.apiKey });
+
+    const userQuery = [
+      params.query,
+      params.destination ? `Destination/focus: ${params.destination}` : null,
+      scope !== 'any' ? `Focus on ${scope} deals` : null,
+      'Find current travel discount coupons, promo codes, and special offers.',
+    ]
+      .filter(Boolean)
+      .join('. ');
+
+    const system = [
+      'You are ORBIT travel deals / coupon search.',
+      'Use web search ONLY. Be literal and conservative.',
+      'HARD RULES:',
+      '- Do NOT invent, guess, or fabricate coupon codes, URLs, savings, expiry dates, or terms.',
+      '- Do NOT use memory or "typical" promos. Only what web search actually returns.',
+      '- If the page does not clearly show a coupon code, set code to null (do not invent one).',
+      '- If nothing real is found, return {"summary":"No verified deals found","deals":[]}.',
+      '- Every deal MUST have a real https sourceUrl from search results.',
+      'Prefer: Booking.com, Agoda, Hotels.com, Expedia, Kayak, major airlines, reputable deal pages.',
+      `Return at most ${maxResults} deals.`,
+      'Respond with JSON only (no markdown fences):',
+      '{"summary":"short overview","deals":[{"title":"...","code":null,"scope":"hotel|flight|package|other","terms":null,"validUntil":null,"sourceUrl":"https://...","provider":"Booking.com","estimatedSaving":null,"currency":null}]}',
+    ].join(' ');
+
+    try {
+      const response = await client.responses.create({
+        model: this.model,
+        tools: [{ type: 'web_search' }],
+        tool_choice: 'required',
+        include: ['web_search_call.action.sources'],
+        input: [
+          { role: 'system', content: system },
+          { role: 'user', content: userQuery },
+        ],
+      });
+
+      const answer =
+        typeof response.output_text === 'string'
+          ? response.output_text
+          : undefined;
+
+      const parsed = this.parseDealsJson(answer, maxResults);
+      let deals = parsed.deals;
+
+      if (!deals.length) {
+        // Fall back to citation URLs as “offer pages” without inventing codes
+        deals = this.dealsFromCitations(response, maxResults);
+      }
+
+      return {
+        ok: true,
+        summary: parsed.summary,
+        deals,
+        disclaimer,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Travel deals search failed';
+      this.logger.warn(`Travel deals search failed: ${message}`);
+      return {
+        ok: false,
+        summary: null,
+        deals: [],
+        error: message,
+        disclaimer,
+      };
+    }
+  }
+
+  private parseDealsJson(
+    text: string | undefined,
+    maxResults: number,
+  ): { summary: string | null; deals: TravelDeal[] } {
+    if (!text) return { summary: null, deals: [] };
+    const jsonText = this.extractJsonObject(text);
+    if (!jsonText) return { summary: null, deals: [] };
+
+    try {
+      const parsed = JSON.parse(jsonText) as {
+        summary?: string;
+        deals?: Array<{
+          title?: string;
+          code?: string | null;
+          scope?: string;
+          terms?: string | null;
+          validUntil?: string | null;
+          sourceUrl?: string;
+          provider?: string;
+          estimatedSaving?: string | null;
+          currency?: string | null;
+        }>;
+      };
+
+      const deals: TravelDeal[] = (parsed.deals ?? [])
+        .filter((d) => {
+          const url = (d.sourceUrl || '').trim();
+          return (
+            Boolean(d.title?.trim()) &&
+            /^https:\/\//i.test(url) &&
+            !/example\.com|placeholder|your-link/i.test(url)
+          );
+        })
+        .slice(0, maxResults)
+        .map((d) => {
+          const url = d.sourceUrl!.trim();
+          const info = resolveHotelProvider(url);
+          const scopeRaw = (d.scope || 'other').toLowerCase();
+          const scope: TravelDeal['scope'] =
+            scopeRaw === 'hotel' ||
+            scopeRaw === 'flight' ||
+            scopeRaw === 'package'
+              ? scopeRaw
+              : 'other';
+          // Drop codes that look fabricated / generic placeholders
+          let code =
+            typeof d.code === 'string' && d.code.trim()
+              ? d.code.trim()
+              : null;
+          if (
+            code &&
+            /^(null|n\/a|none|todo|xxx|test|sample|example|promo|code)$/i.test(
+              code,
+            )
+          ) {
+            code = null;
+          }
+          return {
+            title: d.title!.trim(),
+            code,
+            scope,
+            terms: d.terms?.trim() || null,
+            validUntil: d.validUntil?.trim() || null,
+            sourceUrl: url,
+            provider: d.provider?.trim() || info.provider,
+            estimatedSaving: d.estimatedSaving?.trim() || null,
+            currency: d.currency?.trim() || null,
+            external: true as const,
+          };
+        });
+
+      return {
+        summary: parsed.summary?.trim() || null,
+        deals,
+      };
+    } catch {
+      return { summary: null, deals: [] };
+    }
+  }
+
+  private dealsFromCitations(
+    response: OpenAI.Responses.Response,
+    maxResults: number,
+  ): TravelDeal[] {
+    const out: TravelDeal[] = [];
+    const seen = new Set<string>();
+
+    const push = (title: string, url: string) => {
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      const info = resolveHotelProvider(url);
+      out.push({
+        title: title || info.provider,
+        code: null,
+        scope: 'other',
+        terms: 'Open the partner page to see current offers (no code confirmed).',
+        validUntil: null,
+        sourceUrl: url,
+        provider: info.provider,
+        estimatedSaving: null,
+        currency: null,
+        external: true,
+      });
+    };
+
+    for (const item of response.output ?? []) {
+      if (item.type === 'web_search_call') {
+        const action = item.action as
+          | { sources?: Array<{ url?: string; title?: string }> }
+          | undefined;
+        for (const s of action?.sources ?? []) {
+          if (s.url) push(s.title || s.url, s.url);
+          if (out.length >= maxResults) return out;
+        }
+      }
+      if (item.type === 'message') {
+        for (const part of item.content ?? []) {
+          if (part.type !== 'output_text') continue;
+          for (const ann of part.annotations ?? []) {
+            if (ann.type === 'url_citation' && ann.url) {
+              push(ann.title || ann.url, ann.url);
+              if (out.length >= maxResults) return out;
+            }
+          }
+        }
+      }
+    }
+    return out.slice(0, maxResults);
+  }
+
   private parseJsonResults(
     text: string | undefined,
     maxResults: number,
@@ -246,28 +529,63 @@ export class TravelSearchService {
           airline?: string;
           durationMinutes?: number;
           stops?: number;
+          provider?: string;
         }>;
       };
       return (parsed.results ?? [])
         .filter((r) => r.url && r.title)
         .slice(0, maxResults)
-        .map((r) => ({
-          title: r.title!,
-          url: r.url!,
-          content: (r.snippet || '').slice(0, 500),
-          price: typeof r.price === 'number' ? r.price : undefined,
-          currency: r.currency,
-          stars: typeof r.stars === 'number' ? r.stars : undefined,
-          airline: r.airline,
-          durationMinutes:
-            typeof r.durationMinutes === 'number'
-              ? r.durationMinutes
-              : undefined,
-          stops: typeof r.stops === 'number' ? r.stops : undefined,
-        }));
+        .map((r) => {
+          const info = resolveHotelProvider(r.url!);
+          return {
+            title: r.title!,
+            url: r.url!,
+            content: (r.snippet || '').slice(0, 500),
+            price: typeof r.price === 'number' ? r.price : undefined,
+            currency: r.currency,
+            stars: typeof r.stars === 'number' ? r.stars : undefined,
+            airline: r.airline,
+            durationMinutes:
+              typeof r.durationMinutes === 'number'
+                ? r.durationMinutes
+                : undefined,
+            stops: typeof r.stops === 'number' ? r.stops : undefined,
+            provider: r.provider || info.provider,
+            external: true as const,
+          };
+        });
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Tag providers, prefer major OTAs, keep some secondary if needed.
+   */
+  private enrichAndPreferHotelOtas(
+    hits: TravelSearchHit[],
+    maxResults: number,
+  ): TravelSearchHit[] {
+    type Ranked = TravelSearchHit & { major: boolean; known: boolean };
+    const enriched: Ranked[] = hits.map((hit) => {
+      const info = resolveHotelProvider(hit.url);
+      return {
+        ...hit,
+        provider: hit.provider || info.provider,
+        external: true,
+        major: info.isMajorOta,
+        known: info.isKnownHotelSite,
+      };
+    });
+
+    const major = enriched.filter((h) => h.major);
+    const known = enriched.filter((h) => !h.major && h.known);
+    const other = enriched.filter((h) => !h.major && !h.known);
+
+    return [...major, ...known, ...other].slice(0, maxResults).map((h) => {
+      const { major: _m, known: _k, ...hit } = h;
+      return hit;
+    });
   }
 
   private extractJsonObject(text: string): string | null {

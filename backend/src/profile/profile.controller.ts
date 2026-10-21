@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   Param,
   Post,
@@ -35,6 +34,7 @@ import {
   UpdatePreferenceCategoryDto,
   UpdatePreferencesDto,
 } from './dto/preferences.dto';
+import { PREFERENCE_CATEGORIES } from './preferences.constants';
 
 type AuthUser = { id: string; email: string; fullName: string; role: Role };
 
@@ -52,8 +52,7 @@ export class ProfileController {
   })
   @ApiOperation({
     summary: 'Get my profile (Flutter contract)',
-    description:
-      'Flat profile + `preferences` map (category → multiple values).',
+    description: `Flat profile + preferences for fixed categories: ${PREFERENCE_CATEGORIES.join(', ')}.`,
   })
   getMyProfile(@CurrentUser() user: AuthUser) {
     return this.profileService.getMyProfile(user.id);
@@ -66,8 +65,7 @@ export class ProfileController {
   })
   @ApiOperation({
     summary: 'Get my preferences',
-    description:
-      'Returns `{ preferences: { travel: ["beach","family"], food: ["halal"], ... } }`.',
+    description: `Always returns all predefined categories (${PREFERENCE_CATEGORIES.join(', ')}) with string arrays (empty if unset).`,
   })
   getPreferences(@CurrentUser() user: AuthUser) {
     return this.profileService.getPreferences(user.id);
@@ -81,7 +79,7 @@ export class ProfileController {
   @ApiOperation({
     summary: 'Replace all preferences',
     description:
-      'Body: `{ "preferences": { "travel": ["beach","family"], "food": ["halal"] } }`. Replaces the full map.',
+      'Only predefined category keys allowed. Unknown keys → 400. Omitted categories become [].',
   })
   updatePreferences(
     @CurrentUser() user: AuthUser,
@@ -97,13 +95,14 @@ export class ProfileController {
   })
   @ApiParam({
     name: 'category',
+    enum: PREFERENCE_CATEGORIES,
     example: 'travel',
-    description: 'Category key (letters/numbers/underscore)',
+    description: `One of: ${PREFERENCE_CATEGORIES.join(', ')}`,
   })
   @ApiOperation({
     summary: 'Set values for one preference category',
     description:
-      'Replaces that category only. Empty `values` removes the category.',
+      'Replaces values for that category only. Empty `values` clears selections (category stays).',
   })
   setPreferenceCategory(
     @CurrentUser() user: AuthUser,
@@ -118,7 +117,11 @@ export class ProfileController {
     code: ApiCode.PROFILE_UPDATED,
     message: 'Preference values added successfully',
   })
-  @ApiParam({ name: 'category', example: 'travel' })
+  @ApiParam({
+    name: 'category',
+    enum: PREFERENCE_CATEGORIES,
+    example: 'travel',
+  })
   @ApiOperation({
     summary: 'Add values to a preference category',
     description: 'Merges uniquely into existing values for that category.',
@@ -129,20 +132,6 @@ export class ProfileController {
     @Body() dto: AddPreferenceValuesDto,
   ) {
     return this.profileService.addPreferenceValues(user.id, category, dto);
-  }
-
-  @Delete('preferences/:category')
-  @ApiSuccess({
-    code: ApiCode.DELETED,
-    message: 'Preference category removed successfully',
-  })
-  @ApiParam({ name: 'category', example: 'travel' })
-  @ApiOperation({ summary: 'Delete one preference category' })
-  deletePreferenceCategory(
-    @CurrentUser() user: AuthUser,
-    @Param('category') category: string,
-  ) {
-    return this.profileService.deletePreferenceCategory(user.id, category);
   }
 
   @Put()

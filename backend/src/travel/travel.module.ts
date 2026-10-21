@@ -5,6 +5,7 @@ import { TravelPreferencesService } from './travel-preferences.service';
 import { TravelSearchService } from './travel-search.service';
 import { TravelTripService } from './travel-trip.service';
 import { TravelCompareService } from './travel-compare.service';
+import { TravelPlannerService } from './travel-planner.service';
 
 @Module({
   controllers: [TravelController, TripsController],
@@ -13,12 +14,14 @@ import { TravelCompareService } from './travel-compare.service';
     TravelSearchService,
     TravelTripService,
     TravelCompareService,
+    TravelPlannerService,
   ],
   exports: [
     TravelPreferencesService,
     TravelSearchService,
     TravelTripService,
     TravelCompareService,
+    TravelPlannerService,
   ],
 })
 export class TravelModule {}

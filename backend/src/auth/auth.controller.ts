@@ -9,6 +9,11 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { SocialAuthDto } from './dto/social-auth.dto';
 import { ResendOtpDto, VerifyOtpDto } from './dto/otp.dto';
+import {
+  ForgotPasswordDto,
+  ResendResetOtpDto,
+  ResetPasswordDto,
+} from './dto/forgot-password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApiCode, ApiSuccess } from '../common/response';
@@ -55,6 +60,48 @@ export class AuthController {
   })
   resendOtp(@Body() dto: ResendOtpDto) {
     return this.authService.resendRegisterOtp(dto);
+  }
+
+  @Post('forgot-password')
+  @ApiSuccess({
+    code: ApiCode.OTP_SENT,
+    message:
+      'If an account exists for this email, a reset code has been sent',
+  })
+  @ApiOperation({
+    summary: 'Forgot password (step 1 — send reset OTP)',
+    description:
+      'Emails a 6-digit reset code if the account exists, is verified, and has a password. Response does not reveal whether the email exists. Next: `POST /auth/reset-password`.',
+  })
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Post('resend-reset-otp')
+  @ApiSuccess({
+    code: ApiCode.OTP_SENT,
+    message:
+      'If an account exists for this email, a reset code has been sent',
+  })
+  @ApiOperation({
+    summary: 'Resend password-reset OTP',
+  })
+  resendResetOtp(@Body() dto: ResendResetOtpDto) {
+    return this.authService.resendResetOtp(dto);
+  }
+
+  @Post('reset-password')
+  @ApiSuccess({
+    code: ApiCode.PASSWORD_RESET_SUCCESS,
+    message: 'Password reset successfully',
+  })
+  @ApiOperation({
+    summary: 'Reset password (step 2 — OTP + new password → JWT)',
+    description:
+      'Validates reset OTP, sets new password, returns accessToken (user is logged in).',
+  })
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
 
   @Post('login')

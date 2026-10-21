@@ -153,6 +153,7 @@ enum BusinessNoteKind {
 
 enum EmailOtpPurpose {
   REGISTER
+  PASSWORD_RESET
 }
 
 model User {
@@ -188,6 +189,7 @@ model User {
   googleCalendar    GoogleCalendarConnection?
   dailySummaries    DailySummary[]
   businessNotes     BusinessNote[]
+  healthChecks      HealthCheckResult[]
 
   @@map("users")
 }
@@ -266,6 +268,24 @@ model MedicalProfile {
   updatedAt             DateTime @updatedAt
 
   @@map("medical_profiles")
+}
+
+/// Main-page wellness health check (not a clinical diagnosis).
+model HealthCheckResult {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version     String   @default("v1")
+  answers     Json
+  score       Int
+  maxScore    Int
+  level       String
+  tips        String[] @default([])
+  summary     String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("health_check_results")
 }
 
 /// Sidebar folder (ChatGPT-style) — organization only; AI routing is unchanged.
@@ -468,6 +488,12 @@ model Trip {
   currency      String     @default("AED")
   status        TripStatus @default(DRAFT)
   notes         String?
+  /// e.g. family | adventure | relaxation | business
+  purpose       String?
+  /// Selected multi-day itinerary plan (JSON)
+  itinerary     Json?
+  /// [{ category, amount, currency?, note?, at? }]
+  expenseLog    Json       @default("[]")
   selectedHotelOfferId  String?
   selectedFlightOfferId String?
   createdAt     DateTime   @default(now())

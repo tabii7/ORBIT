@@ -216,15 +216,15 @@ export class MainAgentService {
   ): AgentDomain[] {
     const text = message.toLowerCase();
     const travelHits =
-      /\b(hotel|hotels|flight|flights|trip|trips|travel|airport|airline|booking\.com|check[- ]?in|itinerary|visa|destination|cabin|layover)\b/.test(
+      /\b(hotel|hotels|flight|flights|trip|trips|travel|airport|airline|booking\.com|check[- ]?in|itinerary|visa|destination|cabin|layover|coupon|coupons|promo code|discount code|travel deal|hotel deal|flight deal|promotional|where should i (go|travel)|tourist|sightseeing|airport transfer|car rental|travel budget)\b/.test(
         text,
       );
     const healthHits =
-      /\b(medicine|medication|metformin|panadol|pill|dose|symptom|allergy|allergic|doctor|clinic|appointment|blood|prescription|lab|cough|fever|pain|insulin|vitamin|lab report|medical report)\b/.test(
+      /\b(medicine|medication|metformin|panadol|pill|dose|symptom|allergy|allergic|doctor|clinic|appointment|blood|prescription|lab|cough|fever|pain|insulin|vitamin|lab report|medical report|reminders?|my reminders?|all reminders?|list (my )?reminders?|show (my )?reminders?)\b/.test(
         text,
       );
     const financeHits =
-      /\b(budget|expense|expenses|spent|spending|income|salary|stock|stocks|share|shares|watchlist|adx|ticker|portfolio|price alert|fab\.ad|invest|dividend|i spent|log (an )?expense)\b/.test(
+      /\b(budget|expense|expenses|spent|spending|income|salary|stock|stocks|share|shares|watchlist|adx|ticker|portfolio|price alert|fab\.ad|invest|dividend|i spent|log (an )?expense|halal|haram|sharia|shariah|islamic finance|bitcoin|btc|crypto|gold|lithium|xau)\b/.test(
         text,
       ) || /\b(aed\s*\d|\d+\s*aed)\b/.test(text);
     const businessHits =
@@ -261,21 +261,21 @@ export class MainAgentService {
   private isStrongSingleDomain(message: string): boolean {
     const text = message.toLowerCase();
     const travelOnly =
-      /\b(find hotels?|search hotels?|flights? to|plan (a |my )?trip|book(ing)? (hotel|flight))\b/.test(
+      /\b(find hotels?|search hotels?|flights? to|plan (a |my )?trip|book(ing)? (hotel|flight)|hotel coupons?|promo codes?|travel deals?|discount coupons?)\b/.test(
         text,
       ) &&
       !/\b(medicine|metformin|budget|stock|task|calendar|meeting|business)\b/.test(
         text,
       );
     const healthOnly =
-      /\b(remind me .*(medicine|metformin|panadol|pill|dose)|i am allergic|log (my )?symptom|doctor (tomorrow|today|at))\b/.test(
+      /\b(remind me .*(medicine|metformin|panadol|pill|dose)|i am allergic|log (my )?symptom|doctor (tomorrow|today|at)|(list|show|get|what are|all) (my )?reminders?|my reminders? list)\b/.test(
         text,
       ) &&
       !/\b(hotel|flight|budget|stock|task|calendar|organize my day|business)\b/.test(
         text,
       );
     const financeOnly =
-      /\b(i spent|log (an )?expense|add .+ to (my )?watchlist|price alert|budget summary|stock price|adx (news|market)|market (and )?stock|stock highlights|live (rate|price|market)|today'?s market)\b/.test(
+      /\b(i spent|log (an )?expense|add .+ to (my )?watchlist|price alert|budget summary|stock price|adx (news|market)|market (and )?stock|stock highlights|live (rate|price|market)|today'?s market|is .+ halal|halal stock|haram stock|sharia|bitcoin|gold price|lithium market)\b/.test(
         text,
       ) &&
       !/\b(hotel|flight|medicine|task|calendar|meeting|business)\b/.test(text);

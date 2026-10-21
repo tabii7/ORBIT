@@ -179,6 +179,60 @@ export function createFinanceAgentTools(deps: {
     },
   );
 
+  const screenShariaStock = tool(
+    async (input) => {
+      const result = await financeSearchService.screenShariaStock(input.symbol);
+      actions.push({
+        type: 'FINANCE_SHARIA_SCREEN',
+        data: {
+          symbol: input.symbol,
+          ok: result.ok,
+          status: result.data.status,
+        },
+      });
+      return JSON.stringify({
+        ...result,
+        instruction:
+          'Report ONLY the tool status (HALAL|HARAM|MIXED|UNKNOWN), criteria bullets, and source links. If UNKNOWN or empty sources, say screening could not be verified — do not invent Halal/Haram. Always include the disclaimer. Not a fatwa.',
+      });
+    },
+    {
+      name: 'screen_sharia_stock',
+      description:
+        'Web-search Sharia/Islamic screening for a stock ticker (Halal vs Haram). Returns HALAL|HARAM|MIXED|UNKNOWN with criteria and sources. Never invent. Chat-only.',
+      schema: z.object({
+        symbol: z
+          .string()
+          .describe('Ticker e.g. AAPL, FAB.AD, TSLA'),
+      }),
+    },
+  );
+
+  const analyzeAsset = tool(
+    async (input) => {
+      const result = await financeSearchService.analyzeAsset(input.asset);
+      actions.push({
+        type: 'FINANCE_ASSET_INSIGHT',
+        data: { asset: input.asset, ok: result.ok },
+      });
+      return JSON.stringify({
+        ...result,
+        instruction:
+          'Present summary, priceNote (if any), trends, risks, opportunities, uncertainties, and source links FROM THE TOOL ONLY. Always include the disclaimer. Never invent prices or guarantee returns. Not investment advice.',
+      });
+    },
+    {
+      name: 'analyze_asset',
+      description:
+        'Web-search insights for Bitcoin, gold, lithium, or similar assets: trends, risks, opportunities, uncertainties + sources. No return guarantees. Chat-only.',
+      schema: z.object({
+        asset: z
+          .string()
+          .describe('e.g. Bitcoin, gold, lithium, BTC, XAU'),
+      }),
+    },
+  );
+
   const addWatchlist = tool(
     async (input) => {
       const item = await watchlistService.add(userId, {
@@ -282,6 +336,8 @@ export function createFinanceAgentTools(deps: {
     searchMarket,
     getQuote,
     getMarketNews,
+    screenShariaStock,
+    analyzeAsset,
     logExpense,
     logIncome,
     listBudget,

@@ -134,16 +134,40 @@ export function createHealthAgentTools(deps: {
       };
       const key = input.type?.toUpperCase();
       const type = key ? typeMap[key] : undefined;
+      const status = (input.status || 'active').toLowerCase();
+      const isActive =
+        status === 'all' ? undefined : status === 'inactive' ? false : true;
       const rows = await remindersService.listForUser(userId, {
         type,
-        isActive: true,
+        isActive,
       });
-      return JSON.stringify(rows);
+      const items = rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        type: r.type,
+        remindAt: r.remindAt,
+        recurrence: r.recurrence,
+        timesOfDay: r.timesOfDay ?? [],
+        isActive: r.isActive,
+        medicineName: r.medicineName ?? null,
+        description: r.description ?? null,
+      }));
+      return JSON.stringify({
+        ok: true,
+        count: items.length,
+        status: status === 'all' ? 'all' : status === 'inactive' ? 'inactive' : 'active',
+        timezone,
+        items,
+      });
     },
     {
       name: 'list_reminders',
-      description: 'List active reminders for this user.',
+      description:
+        'List the user reminders. Use when they ask for their reminders / all reminders / reminder list. status=all returns active+inactive; default active. Optional type filter.',
       schema: z.object({
+        status: z
+          .enum(['active', 'all', 'inactive', 'ACTIVE', 'ALL', 'INACTIVE'])
+          .optional(),
         type: z
           .enum([
             'MEDICINE',
