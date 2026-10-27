@@ -18,6 +18,7 @@ import { BusinessModule } from './business/business.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SupportModule } from './support/support.module';
 import { HealthCheckModule } from './health-check/health-check.module';
+import { BillingModule } from './billing/billing.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { HealthCheckModule } from './health-check/health-check.module';
     BusinessModule,
     NotificationsModule,
     SupportModule,
+    BillingModule,
     AiModule,
     ConversationsModule,
   ],

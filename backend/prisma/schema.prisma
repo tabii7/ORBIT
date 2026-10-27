@@ -190,8 +190,113 @@ model User {
   dailySummaries    DailySummary[]
   businessNotes     BusinessNote[]
   healthChecks      HealthCheckResult[]
+  stripeCustomerId  String?           @unique
+  subscription      UserSubscription?
+  creditAccount     UserCreditAccount?
+  creditLedger      CreditLedgerEntry[]
 
   @@map("users")
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  INCOMPLETE
+  TRIALING
+  EXPIRED
+}
+
+enum CreditReason {
+  SIGNUP_BONUS
+  SUBSCRIPTION_GRANT
+  CHAT_SPEND
+  REFUND
+  ADJUSTMENT
+  PERIOD_RESET
+}
+
+/// Catalog plan (Basic / Plus / Pro). Prices live in PlanPrice (monthly + yearly).
+model SubscriptionPlan {
+  id          String             @id @default(cuid())
+  code        String             @unique
+  name        String
+  description String?
+  sortOrder   Int                @default(0)
+  isActive    Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  prices      PlanPrice[]
+  subscriptions UserSubscription[]
+
+  @@map("subscription_plans")
+}
+
+model PlanPrice {
+  id               String          @id @default(cuid())
+  planId           String
+  plan             SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  interval         BillingInterval
+  amountCents      Int
+  currency         String          @default("usd")
+  /// Credits granted at start of each billing period
+  creditsPerPeriod Int
+  stripePriceId    String?         @unique
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@unique([planId, interval])
+  @@map("plan_prices")
+}
+
+model UserSubscription {
+  id                   String             @id @default(cuid())
+  userId               String             @unique
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId               String
+  plan                 SubscriptionPlan   @relation(fields: [planId], references: [id])
+  priceId              String?
+  status               SubscriptionStatus @default(INCOMPLETE)
+  interval             BillingInterval
+  stripeSubscriptionId String?            @unique
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([status])
+  @@map("user_subscriptions")
+}
+
+model UserCreditAccount {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance   Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@map("user_credit_accounts")
+}
+
+model CreditLedgerEntry {
+  id           String       @id @default(cuid())
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  delta        Int
+  reason       CreditReason
+  balanceAfter Int
+  reference    String?
+  meta         Json?
+  createdAt    DateTime     @default(now())
+
+  @@index([userId, createdAt])
+  @@index([reason, createdAt])
+  @@map("credit_ledger")
 }
 
 /// Pending email OTP (e.g. register). Payload holds signup fields until verified.

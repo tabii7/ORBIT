@@ -24,6 +24,7 @@ import {
 } from './dto/conversation.dto';
 import { UpdateConversationDto } from './dto/chat-folder.dto';
 import { ChatFoldersService } from './chat-folders.service';
+import { CreditsService } from '../billing/credits.service';
 import type { ChatAttachmentInput } from '../ai/agent.types';
 
 export type UploadedChatFiles = {
@@ -39,6 +40,7 @@ export class ConversationsService {
     private readonly fileStorage: FileStorageService,
     private readonly documentExtract: DocumentExtractService,
     private readonly chatFoldersService: ChatFoldersService,
+    private readonly creditsService: CreditsService,
   ) {}
 
   async create(userId: string, dto: CreateConversationDto) {
@@ -180,6 +182,13 @@ export class ConversationsService {
         'Provide message content and/or attach images/documents',
       );
     }
+
+    const hasAttachments = images.length > 0 || documents.length > 0;
+    const creditSpend = await this.creditsService.spendForChat({
+      userId,
+      conversationId,
+      hasAttachments,
+    });
 
     const displayContent =
       content ||
@@ -353,6 +362,11 @@ export class ConversationsService {
     } catch (error) {
       const errMessage =
         error instanceof Error ? error.message : 'AI request failed';
+      const refundBalance = await this.creditsService.refundChatSpend({
+        userId,
+        conversationId,
+        amount: creditSpend.spent,
+      });
       const assistantMessage = await this.prisma.message.create({
         data: {
           conversationId,
@@ -374,6 +388,11 @@ export class ConversationsService {
         assistantMessage,
         actions: [],
         error: errMessage,
+        credits: {
+          spent: 0,
+          refunded: creditSpend.spent,
+          balance: refundBalance,
+        },
       };
     }
 
@@ -389,6 +408,7 @@ export class ConversationsService {
           routedTo: aiResult.routedTo ?? [],
           conversationType: conversation.type,
           attachmentCount: savedAttachments.length,
+          creditsSpent: creditSpend.spent,
         } as Prisma.InputJsonValue,
       },
     });
@@ -409,6 +429,10 @@ export class ConversationsService {
       userMessage: { ...userMessage, attachments: savedAttachments },
       assistantMessage,
       actions: aiResult.actions,
+      credits: {
+        spent: creditSpend.spent,
+        balance: creditSpend.balance,
+      },
     };
   }
 

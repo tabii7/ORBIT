@@ -9,11 +9,13 @@ import { SocialTokenService } from './services/social-token.service';
 import { BrevoMailService } from './services/brevo-mail.service';
 import { UsersModule } from '../users/users.module';
 import { DevicesModule } from '../devices/devices.module';
+import { BillingModule } from '../billing/billing.module';
 
 @Module({
   imports: [
     UsersModule,
     DevicesModule,
+    BillingModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

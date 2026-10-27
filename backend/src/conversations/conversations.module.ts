@@ -6,9 +6,10 @@ import { ConversationsService } from './conversations.service';
 import { ChatFoldersService } from './chat-folders.service';
 import { AiModule } from '../ai/ai.module';
 import { FilesModule } from '../files/files.module';
+import { BillingModule } from '../billing/billing.module';
 
 @Module({
-  imports: [AiModule, FilesModule],
+  imports: [AiModule, FilesModule, BillingModule],
   controllers: [
     ChatController,
     ConversationsController,

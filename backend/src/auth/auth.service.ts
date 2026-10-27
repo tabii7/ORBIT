@@ -30,6 +30,7 @@ import {
 } from './dto/forgot-password.dto';
 import { SocialTokenService } from './services/social-token.service';
 import { BrevoMailService } from './services/brevo-mail.service';
+import { CreditsService } from '../billing/credits.service';
 
 type AuthUser = {
   id: string;
@@ -58,6 +59,7 @@ export class AuthService {
     private readonly devicesService: DevicesService,
     private readonly brevoMail: BrevoMailService,
     private readonly config: ConfigService,
+    private readonly creditsService: CreditsService,
   ) {}
 
   /**
@@ -194,6 +196,7 @@ export class AuthService {
 
     await this.prisma.emailOtp.delete({ where: { id: row.id } });
     await this.saveFcm(user.id, payload.fcmToken, payload.platform);
+    await this.creditsService.grantSignupBonus(user.id);
     return this.buildAuthResponse(user, true);
   }
 
@@ -537,6 +540,7 @@ export class AuthService {
     });
 
     await this.saveFcm(user.id, dto.fcmToken, dto.platform);
+    await this.creditsService.grantSignupBonus(user.id);
     return this.buildAuthResponse(user, true);
   }
 

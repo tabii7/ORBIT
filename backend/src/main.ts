@@ -9,7 +9,10 @@ import {
 } from './common/response';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // rawBody required for Stripe webhook signature verification
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
 
   const uploadDir = process.env.UPLOAD_DIR || '/var/orbit/uploads';
   app.useStaticAssets(uploadDir, { prefix: '/uploads/' });
