@@ -14,6 +14,7 @@ import { TravelSearchService } from '../../travel/travel-search.service';
 import { TravelCompareService } from '../../travel/travel-compare.service';
 import { TravelTripService } from '../../travel/travel-trip.service';
 import { TravelPlannerService } from '../../travel/travel-planner.service';
+import { ProfileService } from '../../profile/profile.service';
 import {
   AgentChatParams,
   AgentChatResult,
@@ -39,6 +40,7 @@ export class TravelAgentService {
     private readonly travelCompareService: TravelCompareService,
     private readonly travelTripService: TravelTripService,
     private readonly travelPlannerService: TravelPlannerService,
+    private readonly profileService: ProfileService,
   ) {}
 
   async chat(params: AgentChatParams): Promise<AgentChatResult> {
@@ -75,6 +77,7 @@ export class TravelAgentService {
       travelTripService: this.travelTripService,
       travelPlannerService: this.travelPlannerService,
       remindersService: this.remindersService,
+      profileService: this.profileService,
       actions,
     });
 

@@ -11,6 +11,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RemindersService } from '../../reminders/reminders.service';
 import { SymptomsService } from '../../symptoms/symptoms.service';
 import { HealthDocumentsService } from '../../health-documents/health-documents.service';
+import { ProfileService } from '../../profile/profile.service';
+import { TravelPreferencesService } from '../../travel/travel-preferences.service';
 import {
   AgentChatParams,
   AgentChatResult,
@@ -34,6 +36,8 @@ export class HealthAgentService {
     private readonly remindersService: RemindersService,
     private readonly symptomsService: SymptomsService,
     private readonly healthDocumentsService: HealthDocumentsService,
+    private readonly profileService: ProfileService,
+    private readonly travelPreferencesService: TravelPreferencesService,
   ) {}
 
   async chat(params: AgentChatParams): Promise<AgentChatResult> {
@@ -73,6 +77,8 @@ export class HealthAgentService {
       remindersService: this.remindersService,
       symptomsService: this.symptomsService,
       healthDocumentsService: this.healthDocumentsService,
+      profileService: this.profileService,
+      travelPreferencesService: this.travelPreferencesService,
       actions,
     });
 

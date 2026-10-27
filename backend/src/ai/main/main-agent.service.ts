@@ -215,14 +215,19 @@ export class MainAgentService {
     attachments?: ChatAttachmentInput[],
   ): AgentDomain[] {
     const text = message.toLowerCase();
-    const travelHits =
-      /\b(hotel|hotels|flight|flights|trip|trips|travel|airport|airline|booking\.com|check[- ]?in|itinerary|visa|destination|cabin|layover|coupon|coupons|promo code|discount code|travel deal|hotel deal|flight deal|promotional|where should i (go|travel)|tourist|sightseeing|airport transfer|car rental|travel budget)\b/.test(
+    const prefsAsk =
+      /\b((my|show|tell|list|what are|get).{0,24}preferences?|preferences?\b|travel preferences?|food preferences?|profile preferences?)\b/.test(
         text,
       );
+    const travelHits =
+      /\b(hotel|hotels|flight|flights|trip|trips|travel|airport|airline|booking\.com|check[- ]?in|itinerary|visa|destination|cabin|layover|coupon|coupons|promo code|discount code|travel deal|hotel deal|flight deal|promotional|where should i (go|travel)|tourist|sightseeing|airport transfer|car rental|travel budget|travel preferences?)\b/.test(
+        text,
+      ) || (prefsAsk && /\btravel\b/.test(text));
     const healthHits =
       /\b(medicine|medication|metformin|panadol|pill|dose|symptom|allergy|allergic|doctor|clinic|appointment|blood|prescription|lab|cough|fever|pain|insulin|vitamin|lab report|medical report|reminders?|my reminders?|all reminders?|list (my )?reminders?|show (my )?reminders?)\b/.test(
         text,
-      );
+      ) ||
+      (prefsAsk && !/\btravel preferences?\b/.test(text));
     const financeHits =
       /\b(budget|expense|expenses|spent|spending|income|salary|stock|stocks|share|shares|watchlist|adx|ticker|portfolio|price alert|fab\.ad|invest|dividend|i spent|log (an )?expense|halal|haram|sharia|shariah|islamic finance|bitcoin|btc|crypto|gold|lithium|xau)\b/.test(
         text,
@@ -268,10 +273,17 @@ export class MainAgentService {
         text,
       );
     const healthOnly =
-      /\b(remind me .*(medicine|metformin|panadol|pill|dose)|i am allergic|log (my )?symptom|doctor (tomorrow|today|at)|(list|show|get|what are|all) (my )?reminders?|my reminders? list)\b/.test(
+      /\b(remind me .*(medicine|metformin|panadol|pill|dose)|i am allergic|log (my )?symptom|doctor (tomorrow|today|at)|(list|show|get|what are|all) (my )?reminders?|my reminders? list|(show|tell|list|what are) (my )?preferences?)\b/.test(
         text,
       ) &&
-      !/\b(hotel|flight|budget|stock|task|calendar|organize my day|business)\b/.test(
+      !/\b(hotel|flight|budget|stock|task|calendar|organize my day|business|travel preferences?)\b/.test(
+        text,
+      );
+    const travelPrefsOnly =
+      /\b(travel preferences?|(show|tell|list|what are).{0,40}travel preferences?)\b/.test(
+        text,
+      ) &&
+      !/\b(medicine|metformin|allergy|stock|task|calendar|business)\b/.test(
         text,
       );
     const financeOnly =
@@ -295,6 +307,7 @@ export class MainAgentService {
       );
     return (
       travelOnly ||
+      travelPrefsOnly ||
       healthOnly ||
       financeOnly ||
       businessOnly ||

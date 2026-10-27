@@ -15,6 +15,8 @@ import { TravelCompareService } from '../../travel/travel-compare.service';
 import { TravelTripService } from '../../travel/travel-trip.service';
 import { TravelPlannerService } from '../../travel/travel-planner.service';
 import { UpdateTravelPreferencesDto } from '../../travel/dto/travel-preferences.dto';
+import { ProfileService } from '../../profile/profile.service';
+import { createPreferenceTools } from '../shared/preference-tools';
 
 export type TravelAgentAction = Record<string, unknown>;
 
@@ -53,6 +55,7 @@ export function createTravelAgentTools(deps: {
   travelTripService: TravelTripService;
   travelPlannerService: TravelPlannerService;
   remindersService: RemindersService;
+  profileService: ProfileService;
   actions: TravelAgentAction[];
 }) {
   const {
@@ -64,18 +67,25 @@ export function createTravelAgentTools(deps: {
     travelTripService,
     travelPlannerService,
     remindersService,
+    profileService,
     actions,
   } = deps;
 
   const getTravelPreferences = tool(
     async () => {
       const prefs = await travelPreferencesService.get(userId);
-      return JSON.stringify(prefs);
+      return JSON.stringify({
+        ok: true,
+        source: 'database',
+        preferences: prefs,
+        instruction:
+          'Report ONLY these DB values. If empty/null, say not saved yet. Never invent preferences.',
+      });
     },
     {
       name: 'get_travel_preferences',
       description:
-        'Fetch saved travel preferences: home city/airport, budgets, hotel stars, airlines, cabin class.',
+        'Fetch saved travel booking preferences from DB (home city/airport, budgets, hotel stars, airlines, cabin). ALWAYS call when user asks for their travel preferences. Never invent.',
       schema: z.object({}),
     },
   );
@@ -928,6 +938,11 @@ export function createTravelAgentTools(deps: {
   return [
     getTravelPreferences,
     saveTravelPreferences,
+    ...createPreferenceTools({
+      userId,
+      profileService,
+      travelPreferencesService,
+    }),
     recommendDestinations,
     estimateTravelBudget,
     searchHotels,

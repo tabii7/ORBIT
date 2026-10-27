@@ -14,6 +14,7 @@ import { FinanceModule } from '../finance/finance.module';
 import { ProductivityModule } from '../productivity/productivity.module';
 import { BusinessModule } from '../business/business.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ProfileModule } from '../profile/profile.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ProductivityModule,
     BusinessModule,
     NotificationsModule,
+    ProfileModule,
   ],
   providers: [
     HealthAgentService,

@@ -10,7 +10,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RemindersService } from '../../reminders/reminders.service';
 import { SymptomsService } from '../../symptoms/symptoms.service';
 import { HealthDocumentsService } from '../../health-documents/health-documents.service';
+import { ProfileService } from '../../profile/profile.service';
+import { TravelPreferencesService } from '../../travel/travel-preferences.service';
 import { resolveRemindAt, normalizeTimesOfDay } from '../../common/time/remind-at';
+import { createPreferenceTools } from '../shared/preference-tools';
 
 export type HealthAgentAction = Record<string, unknown>;
 
@@ -21,6 +24,8 @@ export function createHealthAgentTools(deps: {
   remindersService: RemindersService;
   symptomsService: SymptomsService;
   healthDocumentsService: HealthDocumentsService;
+  profileService: ProfileService;
+  travelPreferencesService: TravelPreferencesService;
   actions: HealthAgentAction[];
 }) {
   const {
@@ -30,6 +35,8 @@ export function createHealthAgentTools(deps: {
     remindersService,
     symptomsService,
     healthDocumentsService,
+    profileService,
+    travelPreferencesService,
     actions,
   } = deps;
 
@@ -775,5 +782,10 @@ export function createHealthAgentTools(deps: {
     searchHealthDocuments,
     getHealthDocument,
     getHealthSummary,
+    ...createPreferenceTools({
+      userId,
+      profileService,
+      travelPreferencesService,
+    }),
   ];
 }
